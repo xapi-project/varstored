@@ -1,6 +1,7 @@
 TARGET = varstored
 
 OBJS :=	device.o \
+	handler.o \
 	pci.o \
 	varstored.o
 

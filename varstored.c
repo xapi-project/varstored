@@ -33,6 +33,7 @@
 #include "debug.h"
 #include "device.h"
 #include "pci.h"
+#include "handler.h"
 
 #define mb() asm volatile ("" : : : "memory")
 
@@ -40,6 +41,7 @@ enum {
     VARSTORED_OPT_DOMAIN,
     VARSTORED_OPT_DEVICE,
     VARSTORED_OPT_FUNCTION,
+    VARSTORED_OPT_FILENAME,
     VARSTORED_NR_OPTS
     };
 
@@ -47,6 +49,7 @@ static struct option varstored_option[] = {
     {"domain", 1, NULL, 0},
     {"device", 1, NULL, 0},
     {"function", 1, NULL, 0},
+    {"filename", 1, NULL, 0},
     {NULL, 0, NULL, 0}
 };
 
@@ -54,10 +57,12 @@ static const char *varstored_option_text[] = {
     "<domid>",
     "<device>",
     "<function>",
+    "<filename>",
     NULL
 };
 
 static const char *prog;
+char *save_name;
 
 static void
 usage(void)
@@ -704,6 +709,11 @@ main(int argc, char **argv, char **envp)
 
         case VARSTORED_OPT_FUNCTION:
             function_str = optarg;
+            break;
+
+        case VARSTORED_OPT_FILENAME:
+            save_name = optarg;
+            load_list();
             break;
 
         default:

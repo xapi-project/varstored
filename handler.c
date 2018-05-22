@@ -1,0 +1,339 @@
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+
+#include "debug.h"
+#include "efi.h"
+#include "handler.h"
+
+#define GUID_LEN 16
+
+enum command_t {
+    COMMAND_GET_VARIABLE,
+    COMMAND_SET_VARIABLE,
+    COMMAND_GET_NEXT_VARIABLE,
+};
+
+struct efi_variable {
+    uint8_t *name;
+    UINTN name_len;
+    uint8_t *data;
+    UINTN data_len;
+    char guid[GUID_LEN];
+    struct efi_variable *next;
+};
+
+static struct efi_variable *var_list;
+
+static enum command_t
+unserialize_command(uint8_t **ptr)
+{
+    enum command_t cmd = **ptr;
+
+    (*ptr)++;
+    return cmd;
+}
+
+static void
+serialize_data(uint8_t **ptr, uint8_t *data, UINTN data_len)
+{
+    memcpy(*ptr, &data_len, sizeof data_len);
+    *ptr += sizeof data_len;
+    memcpy(*ptr, data, data_len);
+    *ptr += data_len;
+}
+
+static void
+serialize_result(uint8_t **ptr, EFI_STATUS status)
+{
+    memcpy(*ptr, &status, sizeof status);
+    *ptr += sizeof status;
+}
+
+static void
+serialize_guid(uint8_t **ptr, char *guid)
+{
+  memcpy(*ptr, guid, GUID_LEN);
+  *ptr += GUID_LEN;
+}
+
+static void
+serialize_uintn(uint8_t **ptr, UINTN var)
+{
+  memcpy(*ptr, &var, sizeof var);
+  *ptr += sizeof var;
+}
+
+static uint8_t *
+unserialize_data(uint8_t **ptr, UINTN *len)
+{
+    uint8_t *data;
+
+    memcpy(len, *ptr, sizeof *len);
+    *ptr += sizeof *len;
+
+    data = malloc(*len);
+    if (!data)
+        abort(); /* XXX */
+
+    memcpy(data, *ptr, *len);
+    *ptr += *len;
+
+    return data;
+}
+
+static void
+unserialize_guid(uint8_t **ptr, char *guid)
+{
+    memcpy(guid, *ptr, GUID_LEN);
+    *ptr += GUID_LEN;
+}
+
+static UINTN
+unserialize_uintn(uint8_t **ptr)
+{
+    UINTN ret;
+
+    memcpy(&ret, *ptr, sizeof ret);
+    *ptr += sizeof ret;
+
+    return ret;
+}
+
+extern char *save_name;
+
+static void
+save_list(void)
+{
+    struct efi_variable *l;
+    FILE *f = fopen(save_name, "w");
+
+    if (!f) {
+        DBG("failed to open %s %s\n", save_name, strerror(errno));
+        abort();
+    }
+
+    l = var_list;
+    while (l) {
+        DBG("write variable to file %lu %lu\n", l->name_len, l->data_len);
+        fwrite(&l->name_len, sizeof l->name_len, 1, f);
+        fwrite(l->name, 1, l->name_len, f);
+        fwrite(&l->data_len, sizeof l->data_len, 1, f);
+        fwrite(l->data, 1, l->data_len, f);
+        fwrite(l->guid, 1, GUID_LEN, f);
+        l = l->next;
+    }
+
+    fclose(f);
+}
+
+void
+load_list(void)
+{
+    struct efi_variable *l;
+    FILE *f = fopen(save_name, "r");
+
+    if (!f) {
+        DBG("failed to open %s : %s\n", save_name, strerror(errno));
+        return;
+    }
+
+    DBG("opened %s\n", save_name);
+
+    for (;;) {
+        UINTN name_len;
+
+        if (fread(&name_len, sizeof name_len, 1, f) != 1)
+            break;
+
+        l = malloc(sizeof *l);
+        if (!l)
+            abort(); /* XXX */
+
+        l->name_len = name_len;
+        l->name = malloc(l->name_len);
+        fread(l->name, 1, l->name_len, f);
+        fread(&l->data_len, sizeof l->data_len, 1, f);
+        l->data = malloc(l->data_len);
+        fread(l->data, 1, l->data_len, f);
+        fread(l->guid, 1, GUID_LEN, f);
+        DBG("read variable from file: namelen %lu datalen %lu\n", l->name_len, l->data_len);
+        l->next = var_list;
+        var_list = l;
+    }
+
+    fclose(f);
+}
+
+static void
+do_get_variable(uint8_t *comm_buf)
+{
+    uint8_t *ptr, *name;
+    char guid[GUID_LEN];
+    UINTN name_len, data_len;
+    struct efi_variable *l;
+
+    ptr = comm_buf;
+    unserialize_command(&ptr);
+    name = unserialize_data(&ptr, &name_len);
+    unserialize_guid(&ptr, guid);
+    data_len = unserialize_uintn(&ptr);
+
+    ptr = comm_buf;
+    l = var_list;
+    while (l) {
+        if (l->name_len == name_len &&
+                !memcmp(l->name, name, name_len) &&
+                !memcmp(l->guid, guid, GUID_LEN)) {
+            if (data_len < l->data_len) {
+                serialize_result(&ptr, EFI_BUFFER_TOO_SMALL);
+                serialize_uintn(&ptr, l->data_len);
+            } else {
+                serialize_result(&ptr, EFI_SUCCESS);
+                serialize_data(&ptr, l->data, l->data_len);
+            }
+            goto out;
+        }
+        l = l->next;
+    }
+
+    serialize_result(&ptr, EFI_NOT_FOUND);
+
+out:
+    free(name);
+}
+
+static void
+do_set_variable(uint8_t *comm_buf)
+{
+    UINTN name_len, data_len;
+    struct efi_variable *l, *prev = NULL;
+    uint8_t *ptr, *name, *data;
+    char guid[GUID_LEN];
+
+    ptr = comm_buf;
+    unserialize_command(&ptr);
+    name = unserialize_data(&ptr, &name_len);
+    data = unserialize_data(&ptr, &data_len);
+    unserialize_guid(&ptr, guid);
+
+    ptr = comm_buf;
+    l = var_list;
+    while (l) {
+        if (l->name_len == name_len &&
+                !memcmp(l->name, name, name_len) &&
+                !memcmp(l->guid, guid, GUID_LEN)) {
+            if (data_len == 0) {
+                if (prev)
+                    prev->next = l->next;
+                else
+                    var_list = l->next;
+                free(l->name);
+                free(l->data);
+                free(l);
+                free(data);
+            } else {
+                free(l->data);
+                l->data = data;
+                l->data_len = data_len;
+            }
+            free(name);
+            serialize_result(&ptr, EFI_SUCCESS);
+            save_list();
+            return;
+        }
+        prev = l;
+        l = l->next;
+    }
+
+    if (data_len == 0) {
+        serialize_result(&ptr, EFI_NOT_FOUND);
+    } else {
+        l = malloc(sizeof *l);
+        if (!l)
+            abort(); /* XXX */
+
+        l->name = name;
+        l->name_len = name_len;
+        l->data = data;
+        l->data_len = data_len;
+        memcpy(l->guid, guid, GUID_LEN);
+        l->next = var_list;
+        var_list = l;
+        serialize_result(&ptr, EFI_SUCCESS);
+        save_list();
+    }
+}
+
+static void
+do_get_next_variable(uint8_t *comm_buf)
+{
+    UINTN name_len, avail_len;
+    uint8_t *ptr, *name;
+    struct efi_variable *l;
+    char nul[2] = {0};
+
+    ptr = comm_buf;
+    unserialize_command(&ptr);
+    name = unserialize_data(&ptr, &name_len);
+    avail_len = unserialize_uintn(&ptr);
+
+    DBG("get next var len %lu %lu\n", name_len, avail_len);
+
+    l = var_list;
+    if (name_len != sizeof(nul) || memcmp(name, nul, name_len)) {
+        while (l) {
+            if (l->name_len == name_len && !memcmp(l->name, name, name_len)) {
+                l = l->next;
+                break;
+            }
+            l = l->next;
+        }
+    }
+
+    ptr = comm_buf;
+    if (l) {
+        DBG("l->name_len %lu avail_len %lu\n", l->name_len, avail_len);
+        if (avail_len < l->name_len) {
+            DBG("res too small\n");
+            serialize_result(&ptr, EFI_BUFFER_TOO_SMALL);
+            serialize_uintn(&ptr, l->name_len);
+        } else {
+            DBG("res success\n");
+            serialize_result(&ptr, EFI_SUCCESS);
+            serialize_data(&ptr, l->name, l->name_len);
+            serialize_guid(&ptr, l->guid);
+        }
+    } else {
+        DBG("res not found\n");
+        serialize_result(&ptr, EFI_NOT_FOUND);
+    }
+
+    free(name);
+}
+
+void dispatch_command(uint8_t *comm_buf)
+{
+    enum command_t command;
+    uint8_t *ptr = comm_buf;
+
+    command = unserialize_command(&ptr);
+    switch (command) {
+    case COMMAND_GET_VARIABLE:
+        DBG("COMMAND_GET_VARIABLE\n");
+        do_get_variable(comm_buf);
+        break;
+    case COMMAND_SET_VARIABLE:
+        DBG("COMMAND_SET_VARIABLE\n");
+        do_set_variable(comm_buf);
+        break;
+    case COMMAND_GET_NEXT_VARIABLE:
+        DBG("COMMAND_GET_NEXT_VARIABLE\n");
+        do_get_next_variable(comm_buf);
+        break;
+    default:
+        DBG("Unknown command\n");
+        break;
+    };
+}

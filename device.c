@@ -13,6 +13,7 @@
 
 #include "debug.h"
 #include "pci.h"
+#include "handler.h"
 #include "device.h"
 
 typedef struct _device_io_state {
@@ -23,6 +24,8 @@ typedef struct _device_io_state {
 } device_io_state_t;
 
 static  device_io_state_t   device_io_state;
+
+static void *shmem;
 
 static void
 device_io_map(void *priv, uint64_t addr)
@@ -54,38 +57,22 @@ device_io_writeb(void *priv, uint64_t offset, uint8_t val)
 {
 }
 
-enum command_t {
-    COMMAND_GET_VARIABLE,
-    COMMAND_SET_VARIABLE,
-};
-
 static void
 device_io_writel(void *priv, uint64_t offset, uint32_t val)
 {
     device_io_state_t *state = priv;
-    void *comm_buf;
-    enum command_t command;
 
-    comm_buf = xc_map_foreign_range(state->xch,
-                                    state->domid,
-                                    XC_PAGE_SIZE,
-                                    PROT_READ | PROT_WRITE,
-                                    val);
+    if (!shmem) {
+        shmem = xc_map_foreign_range(state->xch,
+                                     state->domid,
+                                     XC_PAGE_SIZE,
+                                     PROT_READ | PROT_WRITE,
+                                     val);
+    }
 
-    command = *((uint8_t *)comm_buf);
+    dispatch_command(shmem);
 
-    switch (command) {
-    case COMMAND_GET_VARIABLE:
-        DBG("COMMAND_GET_VARIABLE\n");
-        break;
-    case COMMAND_SET_VARIABLE:
-        DBG("COMMAND_SET_VARIABLE\n");
-        break;
-    default:
-        fprintf(stderr, "Unknown command\n");
-    };
-
-    munmap(comm_buf, XC_PAGE_SIZE);
+    /* munmap(xcomm_buf, XC_PAGE_SIZE); */
 }
 
 static bar_ops_t device_io_ops = {
