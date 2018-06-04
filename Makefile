@@ -36,7 +36,11 @@ $(TARGET): $(LIBS) $(OBJS)
 %.o: %.c
 	gcc -o $@ $(CFLAGS) -c $<
 
-.PHONY: ALWAYS
+check:
+	gcc -o test test.c $$(pkg-config --cflags --libs glib-2.0)
+	./test
+
+.PHONY: check
 
 clean:
 	$(foreach dir,$(SUBDIRS),make -C $(dir) clean)
@@ -44,6 +48,7 @@ clean:
 	rm -f $(DEPS)
 	rm -f $(TARGET)
 	rm -f TAGS
+	rm -f test test.dat
 
 .PHONY: TAGS
 TAGS:
