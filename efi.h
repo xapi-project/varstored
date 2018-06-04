@@ -5,7 +5,11 @@
 
 typedef uint64_t UINTN;
 typedef int64_t INTN;
+typedef uint32_t UINT32;
+typedef uint64_t UINT64;
 typedef UINTN EFI_STATUS;
+typedef unsigned char BOOLEAN;
+typedef unsigned short CHAR16;
 
 #define EFI_MAX_BIT     0x8000000000000000ULL
 
@@ -53,5 +57,33 @@ typedef UINTN EFI_STATUS;
 #define EFI_WARN_DELETE_FAILURE   EFIWARN (2)
 #define EFI_WARN_WRITE_FAILURE    EFIWARN (3)
 #define EFI_WARN_BUFFER_TOO_SMALL EFIWARN (4)
+
+
+///
+/// Attributes of variable.
+///
+#define EFI_VARIABLE_NON_VOLATILE                            0x00000001
+#define EFI_VARIABLE_BOOTSERVICE_ACCESS                      0x00000002
+#define EFI_VARIABLE_RUNTIME_ACCESS                          0x00000004
+///
+/// This attribute is identified by the mnemonic 'HR'
+/// elsewhere in this specification.
+///
+#define EFI_VARIABLE_HARDWARE_ERROR_RECORD                   0x00000008
+///
+/// Attributes of Authenticated Variable
+///
+#define EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS   0x00000020
+#define EFI_VARIABLE_APPEND_WRITE                            0x00000040
+///
+/// NOTE: EFI_VARIABLE_AUTHENTICATED_WRITE_ACCESS is deprecated and should be considered reserved.
+///
+#define EFI_VARIABLE_AUTHENTICATED_WRITE_ACCESS              0x00000010
+
+/* All the access bits */
+#define EFI_VAR_ACCESS (EFI_VARIABLE_RUNTIME_ACCESS | \
+                        EFI_VARIABLE_BOOTSERVICE_ACCESS | \
+                        EFI_VARIABLE_AUTHENTICATED_WRITE_ACCESS | \
+                        EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS)
 
 #endif

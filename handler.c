@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include <errno.h>
 
@@ -8,11 +9,21 @@
 #include "handler.h"
 
 #define GUID_LEN 16
+#define NAME_LIMIT 4096 /* Maximum length of name */
+#define DATA_LIMIT 57344 /* Maximum length of a single variable */
+#define TOTAL_LIMIT 65536 /* Maximum total storage */
+/*
+ * A single variable takes up a minimum number of bytes.
+ * This ensures a suitably low limit on the number of variables that can be
+ * stored.
+ */
+#define VARIABLE_SIZE_MIN 64
 
 enum command_t {
     COMMAND_GET_VARIABLE,
     COMMAND_SET_VARIABLE,
     COMMAND_GET_NEXT_VARIABLE,
+    COMMAND_QUERY_VARIABLE_INFO,
 };
 
 struct efi_variable {
@@ -21,6 +32,7 @@ struct efi_variable {
     uint8_t *data;
     UINTN data_len;
     char guid[GUID_LEN];
+    UINT32 attributes;
     struct efi_variable *next;
 };
 
@@ -65,17 +77,34 @@ serialize_uintn(uint8_t **ptr, UINTN var)
   *ptr += sizeof var;
 }
 
+static void
+serialize_uint32(uint8_t **ptr, UINT32 var)
+{
+  memcpy(*ptr, &var, sizeof var);
+  *ptr += sizeof var;
+}
+
+static void
+serialize_uint64(uint8_t **ptr, UINT64 var)
+{
+  memcpy(*ptr, &var, sizeof var);
+  *ptr += sizeof var;
+}
+
 static uint8_t *
-unserialize_data(uint8_t **ptr, UINTN *len)
+unserialize_data(uint8_t **ptr, UINTN *len, UINTN limit)
 {
     uint8_t *data;
 
     memcpy(len, *ptr, sizeof *len);
     *ptr += sizeof *len;
 
+    if (*len > limit || *len == 0)
+        return NULL;
+
     data = malloc(*len);
     if (!data)
-        abort(); /* XXX */
+        return NULL;
 
     memcpy(data, *ptr, *len);
     *ptr += *len;
@@ -101,6 +130,28 @@ unserialize_uintn(uint8_t **ptr)
     return ret;
 }
 
+static BOOLEAN
+unserialize_boolean(uint8_t **ptr)
+{
+    BOOLEAN ret;
+
+    memcpy(&ret, *ptr, sizeof ret);
+    *ptr += sizeof ret;
+
+    return ret;
+}
+
+static UINT32
+unserialize_uint32(uint8_t **ptr)
+{
+    UINT32 ret;
+
+    memcpy(&ret, *ptr, sizeof ret);
+    *ptr += sizeof ret;
+
+    return ret;
+}
+
 extern char *save_name;
 
 static void
@@ -116,12 +167,15 @@ save_list(void)
 
     l = var_list;
     while (l) {
-        DBG("write variable to file %lu %lu\n", l->name_len, l->data_len);
-        fwrite(&l->name_len, sizeof l->name_len, 1, f);
-        fwrite(l->name, 1, l->name_len, f);
-        fwrite(&l->data_len, sizeof l->data_len, 1, f);
-        fwrite(l->data, 1, l->data_len, f);
-        fwrite(l->guid, 1, GUID_LEN, f);
+        if ((l->attributes & EFI_VARIABLE_NON_VOLATILE)) {
+            DBG("write variable to file %lu %lu\n", l->name_len, l->data_len);
+            fwrite(&l->name_len, sizeof l->name_len, 1, f);
+            fwrite(l->name, 1, l->name_len, f);
+            fwrite(&l->data_len, sizeof l->data_len, 1, f);
+            fwrite(l->data, 1, l->data_len, f);
+            fwrite(l->guid, 1, GUID_LEN, f);
+            fwrite(&l->attributes, sizeof l->attributes, 1, f);
+        }
         l = l->next;
     }
 
@@ -158,6 +212,7 @@ load_list(void)
         l->data = malloc(l->data_len);
         fread(l->data, 1, l->data_len, f);
         fread(l->guid, 1, GUID_LEN, f);
+        fread(&l->attributes, 1, sizeof l->attributes, f);
         DBG("read variable from file: namelen %lu datalen %lu\n", l->name_len, l->data_len);
         l->next = var_list;
         var_list = l;
@@ -166,19 +221,43 @@ load_list(void)
     fclose(f);
 }
 
+static uint64_t
+get_space_usage(void)
+{
+    struct efi_variable *l;
+    uint64_t total = 0;
+
+    l = var_list;
+    while (l) {
+        uint64_t amount = l->name_len + l->data_len;
+
+        total += amount < VARIABLE_SIZE_MIN ? VARIABLE_SIZE_MIN : amount;
+        l = l->next;
+    }
+
+    return total;
+}
+
 static void
 do_get_variable(uint8_t *comm_buf)
 {
     uint8_t *ptr, *name;
     char guid[GUID_LEN];
     UINTN name_len, data_len;
+    BOOLEAN at_runtime;
     struct efi_variable *l;
 
     ptr = comm_buf;
+    unserialize_uint32(&ptr); /* version */
     unserialize_command(&ptr);
-    name = unserialize_data(&ptr, &name_len);
+    name = unserialize_data(&ptr, &name_len, NAME_LIMIT);
+    if (!name) {
+        serialize_result(&comm_buf, name_len == 0 ? EFI_NOT_FOUND : EFI_DEVICE_ERROR);
+        return;
+    }
     unserialize_guid(&ptr, guid);
     data_len = unserialize_uintn(&ptr);
+    at_runtime = unserialize_boolean(&ptr);
 
     ptr = comm_buf;
     l = var_list;
@@ -186,11 +265,16 @@ do_get_variable(uint8_t *comm_buf)
         if (l->name_len == name_len &&
                 !memcmp(l->name, name, name_len) &&
                 !memcmp(l->guid, guid, GUID_LEN)) {
+            if (at_runtime && !(l->attributes & EFI_VARIABLE_RUNTIME_ACCESS)) {
+                l = l->next;
+                continue;
+            }
             if (data_len < l->data_len) {
                 serialize_result(&ptr, EFI_BUFFER_TOO_SMALL);
                 serialize_uintn(&ptr, l->data_len);
             } else {
                 serialize_result(&ptr, EFI_SUCCESS);
+                serialize_uint32(&ptr, l->attributes);
                 serialize_data(&ptr, l->data, l->data_len);
             }
             goto out;
@@ -211,20 +295,71 @@ do_set_variable(uint8_t *comm_buf)
     struct efi_variable *l, *prev = NULL;
     uint8_t *ptr, *name, *data;
     char guid[GUID_LEN];
+    UINT32 attr;
+    BOOLEAN at_runtime, append;
 
     ptr = comm_buf;
+    unserialize_uint32(&ptr); /* version */
     unserialize_command(&ptr);
-    name = unserialize_data(&ptr, &name_len);
-    data = unserialize_data(&ptr, &data_len);
+    name = unserialize_data(&ptr, &name_len, NAME_LIMIT);
+    if (!name) {
+        serialize_result(&comm_buf, name_len == 0 ? EFI_INVALID_PARAMETER : EFI_DEVICE_ERROR);
+        return;
+    }
     unserialize_guid(&ptr, guid);
-
+    data = unserialize_data(&ptr, &data_len, DATA_LIMIT);
+    if (!data && data_len) {
+        serialize_result(&comm_buf, data_len > DATA_LIMIT ? EFI_OUT_OF_RESOURCES : EFI_DEVICE_ERROR);
+        free(name);
+        return;
+    }
+    attr = unserialize_uint32(&ptr);
+    at_runtime = unserialize_boolean(&ptr);
     ptr = comm_buf;
+
+    append = !!(attr & EFI_VARIABLE_APPEND_WRITE);
+    attr &= ~EFI_VARIABLE_APPEND_WRITE;
+
+    /* The hardware error record is not supported for now. */
+    if (attr & EFI_VARIABLE_HARDWARE_ERROR_RECORD) {
+        serialize_result(&ptr, EFI_INVALID_PARAMETER);
+        goto err;
+    }
+
+    /* Authenticated variables are not supported for now. */
+    if (attr & EFI_VARIABLE_AUTHENTICATED_WRITE_ACCESS ||
+            attr & EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS) {
+        serialize_result(&ptr, EFI_INVALID_PARAMETER);
+        goto err;
+    }
+
+    /* If runtime access is set, bootservice access must also be set. */
+    if ((attr & (EFI_VARIABLE_RUNTIME_ACCESS |
+               EFI_VARIABLE_BOOTSERVICE_ACCESS)) == EFI_VARIABLE_RUNTIME_ACCESS) {
+        serialize_result(&ptr, EFI_INVALID_PARAMETER);
+        goto err;
+    }
+
+    /* If we're at runtime, runtime access must be set. */
+    if (at_runtime && !(attr & EFI_VARIABLE_RUNTIME_ACCESS)) {
+        serialize_result(&ptr, EFI_INVALID_PARAMETER);
+        goto err;
+    }
+
+    /* If we're at runtime, only non-volatile variable can be set. */
+    if (at_runtime && !(attr & EFI_VARIABLE_NON_VOLATILE)) {
+        serialize_result(&ptr, EFI_WRITE_PROTECTED);
+        goto err;
+    }
+
     l = var_list;
     while (l) {
         if (l->name_len == name_len &&
                 !memcmp(l->name, name, name_len) &&
                 !memcmp(l->guid, guid, GUID_LEN)) {
-            if (data_len == 0) {
+            bool should_save = !!(l->attributes & EFI_VARIABLE_NON_VOLATILE);
+
+            if ((data_len == 0 && !append) || !(attr & EFI_VAR_ACCESS)) {
                 if (prev)
                     prev->next = l->next;
                 else
@@ -234,36 +369,79 @@ do_set_variable(uint8_t *comm_buf)
                 free(l);
                 free(data);
             } else {
-                free(l->data);
-                l->data = data;
-                l->data_len = data_len;
+                if (l->attributes != attr) {
+                    serialize_result(&ptr, EFI_INVALID_PARAMETER);
+                    goto err;
+                }
+                if (append) {
+                    uint8_t *new_data;
+
+                    if (get_space_usage() + data_len > TOTAL_LIMIT) {
+                        serialize_result(&ptr, EFI_OUT_OF_RESOURCES);
+                        goto err;
+                    }
+                    new_data = realloc(l->data, l->data_len + data_len);
+                    if (!new_data) {
+                        serialize_result(&ptr, EFI_DEVICE_ERROR);
+                        goto err;
+                    }
+                    l->data = new_data;
+                    memcpy(l->data + l->data_len, data, data_len);
+                    free(data);
+                    l->data_len += data_len;
+                } else {
+                    if (get_space_usage() - l->data_len + data_len > TOTAL_LIMIT) {
+                        serialize_result(&ptr, EFI_OUT_OF_RESOURCES);
+                        goto err;
+                    }
+                    free(l->data);
+                    l->data = data;
+                    l->data_len = data_len;
+                }
             }
             free(name);
             serialize_result(&ptr, EFI_SUCCESS);
-            save_list();
+            if (should_save)
+                save_list();
             return;
         }
         prev = l;
         l = l->next;
     }
 
-    if (data_len == 0) {
+    if (data_len == 0 || !(attr & EFI_VAR_ACCESS)) {
         serialize_result(&ptr, EFI_NOT_FOUND);
+        goto err;
     } else {
+        if (get_space_usage() + name_len + data_len > TOTAL_LIMIT) {
+            serialize_result(&ptr, EFI_OUT_OF_RESOURCES);
+            goto err;
+        }
+
         l = malloc(sizeof *l);
-        if (!l)
-            abort(); /* XXX */
+        if (!l) {
+            serialize_result(&ptr, EFI_DEVICE_ERROR);
+            goto err;
+        }
 
         l->name = name;
         l->name_len = name_len;
+        memcpy(l->guid, guid, GUID_LEN);
         l->data = data;
         l->data_len = data_len;
-        memcpy(l->guid, guid, GUID_LEN);
+        l->attributes = attr;
         l->next = var_list;
         var_list = l;
         serialize_result(&ptr, EFI_SUCCESS);
-        save_list();
+        if ((attr & EFI_VARIABLE_NON_VOLATILE))
+            save_list();
     }
+
+    return;
+
+err:
+    free(name);
+    free(data);
 }
 
 static void
@@ -272,51 +450,101 @@ do_get_next_variable(uint8_t *comm_buf)
     UINTN name_len, avail_len;
     uint8_t *ptr, *name;
     struct efi_variable *l;
-    char nul[2] = {0};
+    char guid[GUID_LEN];
+    BOOLEAN at_runtime;
 
     ptr = comm_buf;
+    unserialize_uint32(&ptr); /* version */
     unserialize_command(&ptr);
-    name = unserialize_data(&ptr, &name_len);
     avail_len = unserialize_uintn(&ptr);
+    name = unserialize_data(&ptr, &name_len, NAME_LIMIT);
+    if (!name && name_len) {
+        serialize_result(&comm_buf, EFI_DEVICE_ERROR);
+        return;
+    }
+    unserialize_guid(&ptr, guid);
+    at_runtime = unserialize_boolean(&ptr);
 
-    DBG("get next var len %lu %lu\n", name_len, avail_len);
-
+    ptr = comm_buf;
     l = var_list;
-    if (name_len != sizeof(nul) || memcmp(name, nul, name_len)) {
+
+    if (name_len) {
         while (l) {
-            if (l->name_len == name_len && !memcmp(l->name, name, name_len)) {
-                l = l->next;
+            if (l->name_len == name_len &&
+                    !memcmp(l->name, name, name_len) &&
+                    !memcmp(l->guid, guid, GUID_LEN) &&
+                    (!at_runtime || (l->attributes & EFI_VARIABLE_RUNTIME_ACCESS)))
                 break;
-            }
             l = l->next;
         }
+        if (!l) {
+            /* Given name & guid didn't match an existing variable */
+            serialize_result(&ptr, EFI_INVALID_PARAMETER);
+            goto out;
+        }
+        l = l->next;
     }
 
-    ptr = comm_buf;
+    /* Find the next valid variable, if any. */
+    while (at_runtime && l && !(l->attributes & EFI_VARIABLE_RUNTIME_ACCESS))
+        l = l->next;
+
     if (l) {
-        DBG("l->name_len %lu avail_len %lu\n", l->name_len, avail_len);
-        if (avail_len < l->name_len) {
-            DBG("res too small\n");
+        if (avail_len < l->name_len + sizeof(CHAR16)) {
             serialize_result(&ptr, EFI_BUFFER_TOO_SMALL);
-            serialize_uintn(&ptr, l->name_len);
+            serialize_uintn(&ptr, l->name_len + sizeof(CHAR16));
         } else {
-            DBG("res success\n");
             serialize_result(&ptr, EFI_SUCCESS);
             serialize_data(&ptr, l->name, l->name_len);
             serialize_guid(&ptr, l->guid);
         }
     } else {
-        DBG("res not found\n");
         serialize_result(&ptr, EFI_NOT_FOUND);
     }
 
+out:
     free(name);
+}
+
+static void
+do_query_variable_info(uint8_t *comm_buf)
+{
+    uint8_t *ptr;
+    UINT32 attr;
+
+    ptr = comm_buf;
+    unserialize_uint32(&ptr); /* version */
+    unserialize_command(&ptr);
+    attr = unserialize_uint32(&ptr);
+
+    ptr = comm_buf;
+
+    if ((attr & EFI_VARIABLE_HARDWARE_ERROR_RECORD)) {
+        serialize_result(&ptr, EFI_UNSUPPORTED);
+        return;
+    }
+
+    /*
+     * In this implementation, all variables share a common storage area, so
+     * there is no need to check the attributes further.
+     */
+    serialize_result(&ptr, EFI_SUCCESS);
+    serialize_uint64(&ptr, TOTAL_LIMIT);
+    serialize_uint64(&ptr, TOTAL_LIMIT - get_space_usage());
+    serialize_uint64(&ptr, DATA_LIMIT);
 }
 
 void dispatch_command(uint8_t *comm_buf)
 {
     enum command_t command;
+    UINT32 version;
     uint8_t *ptr = comm_buf;
+
+    version = unserialize_uint32(&ptr);
+    if (version != 1) {
+        DBG("Unknown version: %u\n", version);
+        return;
+    }
 
     command = unserialize_command(&ptr);
     switch (command) {
@@ -331,6 +559,10 @@ void dispatch_command(uint8_t *comm_buf)
     case COMMAND_GET_NEXT_VARIABLE:
         DBG("COMMAND_GET_NEXT_VARIABLE\n");
         do_get_next_variable(comm_buf);
+        break;
+    case COMMAND_QUERY_VARIABLE_INFO:
+        DBG("COMMAND_QUERY_VARIABLE_INFO\n");
+        do_query_variable_info(comm_buf);
         break;
     default:
         DBG("Unknown command\n");
