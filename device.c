@@ -5,6 +5,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include <assert.h>
+#include <errno.h>
 
 #include <sys/types.h>
 #include <sys/mman.h>
@@ -24,8 +25,6 @@ typedef struct _device_io_state {
 } device_io_state_t;
 
 static  device_io_state_t   device_io_state;
-
-static void *shmem;
 
 static void
 device_io_map(void *priv, uint64_t addr)
@@ -60,19 +59,22 @@ device_io_writeb(void *priv, uint64_t offset, uint8_t val)
 static void
 device_io_writel(void *priv, uint64_t offset, uint32_t val)
 {
+    void *shmem;
     device_io_state_t *state = priv;
 
+    shmem = xc_map_foreign_range(state->xch,
+                                 state->domid,
+                                 XC_PAGE_SIZE,
+                                 PROT_READ | PROT_WRITE,
+                                 val);
     if (!shmem) {
-        shmem = xc_map_foreign_range(state->xch,
-                                     state->domid,
-                                     XC_PAGE_SIZE,
-                                     PROT_READ | PROT_WRITE,
-                                     val);
+        DBG("map foreign range failed: %d\n", errno);
+        return;
     }
 
     dispatch_command(shmem);
 
-    /* munmap(xcomm_buf, XC_PAGE_SIZE); */
+    munmap(shmem, XC_PAGE_SIZE);
 }
 
 static bar_ops_t device_io_ops = {
