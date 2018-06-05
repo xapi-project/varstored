@@ -587,7 +587,14 @@ static void test_set_variable_attr(void)
                       ATTR_BR, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
-    g_assert_cmpuint(status, ==, EFI_WRITE_PROTECTED);
+    g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
+
+    /* Set a variable at runtime without runtime access fails */
+    call_set_variable(tname1, strlen(tname1), tguid1, tdata1, sizeof tdata1,
+                      ATTR_B, 1);
+    ptr = buf;
+    status = unserialize_uintn(&ptr);
+    g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
 }
 
 static void test_set_variable_set(void)
@@ -701,6 +708,7 @@ static void test_set_variable_update(void)
     sv_ok(tname1, tguid1, tdata2, sizeof tdata2, ATTR_B);
 
     sv_ok(tname3, tguid3, tdata3, sizeof tdata3, ATTR_BR);
+    sv_ok(tname4, tguid4, tdata4, sizeof tdata4, ATTR_BNV);
 
     /* Check the update worked. */
     call_get_variable(tname1, strlen(tname1), tguid1, BSIZ, 0);
@@ -727,6 +735,13 @@ static void test_set_variable_update(void)
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_WRITE_PROTECTED);
+
+    /* Updating a variable at runtime without runtime access fails */
+    call_set_variable(tname4, strlen(tname4), tguid4, tdata4, sizeof tdata4,
+                      ATTR_BNV, 1);
+    ptr = buf;
+    status = unserialize_uintn(&ptr);
+    g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
 }
 
 static void test_set_variable_append(void)
@@ -741,6 +756,7 @@ static void test_set_variable_append(void)
     /* Insert some variables */
     sv_ok(tname1, tguid1, tdata1, sizeof tdata1, ATTR_B);
     sv_ok(tname3, tguid3, tdata3, sizeof tdata3, ATTR_BR);
+    sv_ok(tname4, tguid4, tdata4, sizeof tdata4, ATTR_BNV);
 
     /* Append 0 bytes must not delete the variable */
     sv_ok(tname1, tguid1, NULL, 0, ATTR_B|EFI_VARIABLE_APPEND_WRITE);
@@ -767,6 +783,13 @@ static void test_set_variable_append(void)
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_WRITE_PROTECTED);
+
+    /* Appending to a variable at runtime without runtime access fails */
+    call_set_variable(tname4, strlen(tname4), tguid4, tdata4, sizeof tdata4,
+                      ATTR_BNV|EFI_VARIABLE_APPEND_WRITE, 1);
+    ptr = buf;
+    status = unserialize_uintn(&ptr);
+    g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
 }
 
 static void test_set_variable_delete(void)
@@ -779,14 +802,27 @@ static void test_set_variable_delete(void)
     sv_ok(tname1, tguid1, tdata1, sizeof tdata1, ATTR_B);
     sv_ok(tname2, tguid2, tdata2, sizeof tdata2, ATTR_B);
     sv_ok(tname3, tguid3, tdata3, sizeof tdata3, ATTR_BR);
+    sv_ok(tname5, tguid5, tdata5, sizeof tdata5, ATTR_BNV);
 
-    /* Deleting a non-existent variable fails (by setting no data) */
+    /* Deleting a non-existent variable at boottime fails (by setting no data) */
     call_set_variable(tname4, strlen(tname4), tguid4, NULL, 0, ATTR_B, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 
-    /* Deleting a non-existent variable fails (by setting no access attributes) */
+    /* Deleting a non-existent variable at boottime fails (by setting no access attributes) */
+    call_set_variable(tname4, strlen(tname4), tguid4, tdata4, sizeof tdata4, 0, 0);
+    ptr = buf;
+    status = unserialize_uintn(&ptr);
+    g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
+
+    /* Deleting a non-existent variable at runtime fails (by setting no data) */
+    call_set_variable(tname4, strlen(tname4), tguid4, NULL, 0, ATTR_BRNV, 0);
+    ptr = buf;
+    status = unserialize_uintn(&ptr);
+    g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
+
+    /* Deleting a non-existent variable at runtime fails (by setting no access attributes) */
     call_set_variable(tname4, strlen(tname4), tguid4, tdata4, sizeof tdata4, 0, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
@@ -815,6 +851,21 @@ static void test_set_variable_delete(void)
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_WRITE_PROTECTED);
+
+    /* Deleting a variable at runtime without runtime access fails */
+    call_set_variable(tname5, strlen(tname5), tguid5, NULL, 0, ATTR_B, 1);
+    ptr = buf;
+    status = unserialize_uintn(&ptr);
+    g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
+
+    /* Deleting a variable at runtime by setting attributes to 0 succeeds */
+    sv_ok(tname5, tguid5, NULL, 0, ATTR_BNV); /* Remove old variable */
+    sv_ok(tname5, tguid5, tdata5, sizeof tdata5, ATTR_BRNV); /* Insert it with different attr */
+    /* Then delete it at runtime */
+    call_set_variable(tname5, strlen(tname5), tguid5, tdata5, sizeof tdata5, 0, 1);
+    ptr = buf;
+    status = unserialize_uintn(&ptr);
+    g_assert_cmpuint(status, ==, EFI_SUCCESS);
 }
 
 static void test_set_variable_resource_limit(void)

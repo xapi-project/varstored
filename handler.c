@@ -340,24 +340,24 @@ do_set_variable(uint8_t *comm_buf)
         goto err;
     }
 
-    /* If we're at runtime, runtime access must be set. */
-    if (at_runtime && !(attr & EFI_VARIABLE_RUNTIME_ACCESS)) {
-        serialize_result(&ptr, EFI_INVALID_PARAMETER);
-        goto err;
-    }
-
-    /* If we're at runtime, only non-volatile variable can be set. */
-    if (at_runtime && !(attr & EFI_VARIABLE_NON_VOLATILE)) {
-        serialize_result(&ptr, EFI_WRITE_PROTECTED);
-        goto err;
-    }
-
     l = var_list;
     while (l) {
         if (l->name_len == name_len &&
                 !memcmp(l->name, name, name_len) &&
                 !memcmp(l->guid, guid, GUID_LEN)) {
             bool should_save = !!(l->attributes & EFI_VARIABLE_NON_VOLATILE);
+
+            /* Only runtime variables can be updated/deleted at runtime. */
+            if (at_runtime && !(l->attributes & EFI_VARIABLE_RUNTIME_ACCESS)) {
+                serialize_result(&ptr, EFI_INVALID_PARAMETER);
+                goto err;
+            }
+
+            /* Only NV variables can be update/deleted at runtime. */
+            if (at_runtime && !(l->attributes & EFI_VARIABLE_NON_VOLATILE)) {
+                serialize_result(&ptr, EFI_WRITE_PROTECTED);
+                goto err;
+            }
 
             if ((data_len == 0 && !append) || !(attr & EFI_VAR_ACCESS)) {
                 if (prev)
@@ -413,6 +413,12 @@ do_set_variable(uint8_t *comm_buf)
         serialize_result(&ptr, EFI_NOT_FOUND);
         goto err;
     } else {
+        if (at_runtime && (!(attr & EFI_VARIABLE_RUNTIME_ACCESS) ||
+                           !(attr & EFI_VARIABLE_NON_VOLATILE))) {
+            serialize_result(&ptr, EFI_INVALID_PARAMETER);
+            goto err;
+        }
+
         if (get_space_usage() + name_len + data_len > TOTAL_LIMIT) {
             serialize_result(&ptr, EFI_OUT_OF_RESOURCES);
             goto err;
