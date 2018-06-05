@@ -64,7 +64,7 @@ static void call_get_variable(char *name, UINTN len, char *guid, UINTN avail,
 {
     uint8_t *ptr = buf;
     serialize_uint32(&ptr, 1);
-    *ptr++ = COMMAND_GET_VARIABLE;
+    serialize_uint32(&ptr, (UINT32)COMMAND_GET_VARIABLE);
     serialize_data(&ptr, (uint8_t *)name, len);
     serialize_guid(&ptr, guid);
     serialize_uintn(&ptr, avail);
@@ -77,7 +77,7 @@ static void call_query_variable_info(UINT32 attr)
 {
     uint8_t *ptr = buf;
     serialize_uint32(&ptr, 1);
-    *ptr++ = COMMAND_QUERY_VARIABLE_INFO;
+    serialize_uint32(&ptr, (UINT32)COMMAND_QUERY_VARIABLE_INFO);
     serialize_uint32(&ptr, 0);
 
     dispatch_command(buf);
@@ -88,7 +88,7 @@ static void call_get_next_variable(UINTN avail, char *name, UINTN len,
 {
     uint8_t *ptr = buf;
     serialize_uint32(&ptr, 1);
-    *ptr++ = COMMAND_GET_NEXT_VARIABLE;
+    serialize_uint32(&ptr, (UINT32)COMMAND_GET_NEXT_VARIABLE);
     serialize_uintn(&ptr, avail);
     serialize_data(&ptr, (uint8_t *)name, len);
     serialize_guid(&ptr, guid);
@@ -104,7 +104,7 @@ static void call_set_variable(char *name, UINTN name_len, char *guid,
     uint8_t *ptr = buf;
 
     serialize_uint32(&ptr, 1);
-    *ptr++ = COMMAND_SET_VARIABLE;
+    serialize_uint32(&ptr, (UINT32)COMMAND_SET_VARIABLE);
     serialize_data(&ptr, (uint8_t *)name, name_len);
     serialize_guid(&ptr, guid);
     serialize_data(&ptr, data, data_len);

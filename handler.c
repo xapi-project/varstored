@@ -41,10 +41,12 @@ static struct efi_variable *var_list;
 static enum command_t
 unserialize_command(uint8_t **ptr)
 {
-    enum command_t cmd = **ptr;
+    UINT32 data;
 
-    (*ptr)++;
-    return cmd;
+    memcpy(&data, *ptr, sizeof data);
+    *ptr += sizeof data;
+
+    return (enum command_t)data;
 }
 
 static void
