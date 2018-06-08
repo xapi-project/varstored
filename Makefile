@@ -18,7 +18,7 @@ ifeq ($(shell uname),Linux)
 LDLIBS := -lutil -lrt
 endif
 
-LDLIBS += -lxenstore -lxenctrl
+LDLIBS += -lxenstore -lxenctrl -lcrypto
 
 # Get gcc to generate the dependencies for us.
 CFLAGS   += -Wp,-MD,$(@D)/.$(@F).d

@@ -7,9 +7,14 @@ typedef uint64_t UINTN;
 typedef int64_t INTN;
 typedef uint32_t UINT32;
 typedef uint64_t UINT64;
+typedef uint16_t UINT16;
+typedef int16_t INT16;
+typedef uint8_t UINT8;
 typedef UINTN EFI_STATUS;
 typedef unsigned char BOOLEAN;
 typedef unsigned short CHAR16;
+
+#define GUID_LEN 16
 
 #define EFI_MAX_BIT     0x8000000000000000ULL
 
@@ -82,8 +87,39 @@ typedef unsigned short CHAR16;
 
 /* All the access bits */
 #define EFI_VAR_ACCESS (EFI_VARIABLE_RUNTIME_ACCESS | \
-                        EFI_VARIABLE_BOOTSERVICE_ACCESS | \
-                        EFI_VARIABLE_AUTHENTICATED_WRITE_ACCESS | \
-                        EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS)
+                        EFI_VARIABLE_BOOTSERVICE_ACCESS)
+
+typedef struct __attribute__((packed)) {
+    UINT16 Year;
+    UINT8 Month;
+    UINT8 Day;
+    UINT8 Hour;
+    UINT8 Minute;
+    UINT8 Second;
+    UINT8 Pad1;
+    UINT32 Nanosecond;
+    INT16 TimeZone;
+    UINT8 Daylight;
+    UINT8 Pad2;
+} EFI_TIME;
+
+typedef struct __attribute__((packed)) {
+    UINT32 dwLength;
+    UINT16 wRevision;
+    UINT16 wCertificateType;
+} WIN_CERTIFICATE;
+
+typedef struct __attribute__((packed)) {
+    WIN_CERTIFICATE Hdr;
+    char CertType[GUID_LEN];
+    UINT8 CertData[1];
+} WIN_CERTIFICATE_UEFI_GUID;
+
+typedef struct __attribute__((packed)) {
+    EFI_TIME TimeStamp;
+    WIN_CERTIFICATE_UEFI_GUID AuthInfo;
+} EFI_VARIABLE_AUTHENTICATION_2;
+
+#define WIN_CERT_TYPE_EFI_GUID         0x0EF1
 
 #endif

@@ -4,11 +4,22 @@
 #include <string.h>
 #include <errno.h>
 
+#include <openssl/objects.h>
+#include <openssl/x509.h>
+#include <openssl/x509v3.h>
+#include <openssl/pkcs7.h>
+#include <openssl/err.h>
+
 #include "debug.h"
 #include "efi.h"
 #include "handler.h"
 
-#define GUID_LEN 16
+#define SHA256_DIGEST_SIZE 32
+
+/* Some values from edk2. */
+char gEfiCertPkcs7Guid[] = {0x9d,0xd2,0xaf,0x4a,0xdf,0x68,0xee,0x49,0x8a,0xa9,0x34,0x7d,0x37,0x56,0x65,0xa7};
+uint8_t mOidValue[9] = { 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x07, 0x02 };
+
 #define NAME_LIMIT 4096 /* Maximum length of name */
 #define DATA_LIMIT 57344 /* Maximum length of a single variable */
 #define TOTAL_LIMIT 65536 /* Maximum total storage */
@@ -33,6 +44,8 @@ struct efi_variable {
     UINTN data_len;
     char guid[GUID_LEN];
     UINT32 attributes;
+    EFI_TIME timestamp;
+    uint8_t cert[SHA256_DIGEST_SIZE];
     struct efi_variable *next;
 };
 
@@ -290,6 +303,459 @@ out:
     free(name);
 }
 
+/*
+ * Get the TBS certificate from an X509 certificate.
+ * Adapted from edk2.
+ *
+ * tbs_cert should be freed by the caller.
+ */
+static EFI_STATUS
+X509_get_tbs_cert(X509 *cert, uint8_t **tbs_cert, UINTN *tbs_len)
+{
+    int asn1_tag, obj_class;
+    long len, tmp_len;
+    uint8_t *buf, *ptr, *tbs_ptr;
+
+    len = i2d_X509(cert, NULL);
+    buf = malloc(len);
+    if (!buf)
+        return EFI_DEVICE_ERROR;
+    ptr = buf;
+    i2d_X509(cert, &ptr);
+
+    ptr = buf;
+    tmp_len = 0;
+    ASN1_get_object((const unsigned char **)&ptr, &tmp_len, &asn1_tag, &obj_class, len);
+    if (asn1_tag != V_ASN1_SEQUENCE) {
+        free(buf);
+        return EFI_SECURITY_VIOLATION;
+    }
+
+    tbs_ptr = ptr;
+    ASN1_get_object((const unsigned char **)&ptr, &tmp_len, &asn1_tag, &obj_class, tmp_len);
+    if (asn1_tag != V_ASN1_SEQUENCE) {
+        free(buf);
+        return EFI_SECURITY_VIOLATION;
+    }
+
+    *tbs_len = tmp_len + (ptr - tbs_ptr);
+    *tbs_cert = malloc(*tbs_len);
+    if (!*tbs_cert) {
+        free(buf);
+        return EFI_DEVICE_ERROR;
+    }
+    memcpy(*tbs_cert, tbs_ptr, *tbs_len);
+
+    return EFI_SUCCESS;
+}
+
+/*
+ * Calculate SHA256 digest of:
+ *   SignerCert CommonName + ToplevelCert tbsCertificate
+ * Adapted from edk2.
+ */
+static EFI_STATUS
+sha256_sig(STACK_OF(X509) *certs, X509 *top_level_cert, uint8_t *digest)
+{
+    SHA256_CTX ctx;
+    char name[128];
+    X509_NAME *x509_name;
+    uint8_t *tbs_cert;
+    UINTN tbs_cert_len;
+    EFI_STATUS status;
+    int name_len;
+
+    x509_name = X509_get_subject_name(sk_X509_value(certs, 0));
+    if (!x509_name)
+        return EFI_SECURITY_VIOLATION;
+
+    name_len = X509_NAME_get_text_by_NID(x509_name, NID_commonName,
+                                         name, sizeof(name));
+    if (name_len < 0)
+        return EFI_SECURITY_VIOLATION;
+    name_len++; /* Include trailing NUL character */
+
+    status = X509_get_tbs_cert(top_level_cert, &tbs_cert, &tbs_cert_len);
+    if (status != EFI_SUCCESS)
+        return status;
+
+    status = EFI_DEVICE_ERROR;
+    if (!SHA256_Init(&ctx))
+        goto out;
+
+    if (!SHA256_Update(&ctx, name, strlen(name)))
+        goto out;
+
+    if (!SHA256_Update(&ctx, tbs_cert, tbs_cert_len))
+        goto out;
+
+    if (!SHA256_Final(digest, &ctx))
+        goto out;
+
+    status = EFI_SUCCESS;
+out:
+    free(tbs_cert);
+    return status;
+}
+
+/*
+ * Verification callback function to override the existing callbacks in
+ * OpenSSL.  This is required due to the lack of X509_V_FLAG_NO_CHECK_TIME in
+ * OpenSSL 1.0.2.  This function has been taken directly from an older version
+ * of edk2 and been to use X509_V_ERR_CERT_HAS_EXPIRED. XXX is it used in the
+ * correct way?
+ */
+static int
+X509_verify_cb(int status, X509_STORE_CTX *context)
+{
+    X509_OBJECT *obj = NULL;
+    int error;
+    int index;
+    int count;
+
+    error = X509_STORE_CTX_get_error(context);
+
+    if ((error == X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT) ||
+            (error == X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY)) {
+        obj = malloc(sizeof(*obj));
+        if (!obj)
+            return 0;
+
+        obj->type = X509_LU_X509;
+        obj->data.x509 = context->current_cert;
+
+        CRYPTO_w_lock (CRYPTO_LOCK_X509_STORE);
+
+        if (X509_OBJECT_retrieve_match(context->ctx->objs, obj)) {
+            status = 1;
+        } else {
+            if (error == X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY) {
+                count = sk_X509_num(context->chain);
+                for (index = 0; index < count; index++) {
+                    obj->data.x509 = sk_X509_value(context->chain, index);
+                    if (X509_OBJECT_retrieve_match(context->ctx->objs, obj)) {
+                        status = 1;
+                        break;
+                    }
+                }
+            }
+        }
+
+        CRYPTO_w_unlock (CRYPTO_LOCK_X509_STORE);
+    }
+
+    if ((error == X509_V_ERR_CERT_UNTRUSTED) ||
+            (error == X509_V_ERR_UNABLE_TO_VERIFY_LEAF_SIGNATURE) ||
+            (error == X509_V_ERR_CERT_HAS_EXPIRED))
+        status = 1;
+
+    free(obj);
+
+    return status;
+}
+
+/*
+ * Check whether input p7data is a wrapped ContentInfo structure or not.
+ * Wrap it if needed. Adapted from edk2.
+ * The caller must free wrap_data if wrapped is true.
+ */
+static EFI_STATUS
+wrap_pkcs7_data(const uint8_t *p7data, UINTN p7_len, bool *wrapped,
+                uint8_t **wrap_data, UINTN *wrap_len)
+{
+    uint8_t *sig_data;
+
+    if ((p7data[4] == 0x06) && (p7data[5] == 0x09) &&
+            !memcmp(p7data + 6, mOidValue, sizeof(mOidValue)) &&
+            (p7data[15] == 0xA0) && (p7data[16] == 0x82)) {
+        *wrapped = true;
+        *wrap_data = (uint8_t *)p7data;
+        *wrap_len = p7_len;
+        return EFI_SUCCESS;
+    }
+
+    *wrapped = false;
+    *wrap_len = p7_len + 19;
+    *wrap_data = malloc(*wrap_len);
+    if (!*wrap_data)
+        return EFI_DEVICE_ERROR;
+
+    sig_data = *wrap_data;
+    sig_data[0] = 0x30;
+    sig_data[1] = 0x82;
+    sig_data[2] = ((uint16_t)(*wrap_len - 4)) >> 8;
+    sig_data[3] = ((uint16_t)(*wrap_len - 4)) & 0xff;
+    sig_data[4] = 0x06;
+    sig_data[5] = 0x09;
+    memcpy(sig_data + 6, mOidValue, sizeof(mOidValue));
+    sig_data[15] = 0xA0;
+    sig_data[16] = 0x82;
+    sig_data[17] = ((uint16_t)p7_len) >> 8;
+    sig_data[18] = ((uint16_t)p7_len) & 0xff;
+    memcpy(sig_data + 19, p7data, p7_len);
+
+    return EFI_SUCCESS;
+}
+
+/*
+ * Verify the validity of PKCS#7 data.
+ * Adapted from edk2.
+ */
+static EFI_STATUS
+pkcs7_verify(uint8_t *p7data, UINTN p7_len, X509 *trusted_cert,
+             uint8_t *verify_buf, UINTN verify_len)
+{
+    EFI_STATUS status;
+    bool wrapped;
+    uint8_t *ptr, *sig;
+    UINTN sig_len;
+    PKCS7 *pkcs7 = NULL;
+    BIO *data_bio = NULL;
+    X509_STORE *cert_store = NULL;
+
+    if (!EVP_add_digest(EVP_md5()))
+        return EFI_DEVICE_ERROR;
+    if (!EVP_add_digest(EVP_sha1()))
+        return EFI_DEVICE_ERROR;
+    if (!EVP_add_digest(EVP_sha256()))
+        return EFI_DEVICE_ERROR;
+    if (!EVP_add_digest(EVP_sha384()))
+        return EFI_DEVICE_ERROR;
+    if (!EVP_add_digest(EVP_sha512()))
+        return EFI_DEVICE_ERROR;
+    if (!EVP_add_digest_alias(SN_sha1WithRSAEncryption, SN_sha1WithRSA))
+        return EFI_DEVICE_ERROR;
+
+    status = wrap_pkcs7_data(p7data, p7_len, &wrapped, &sig, &sig_len);
+    if (EFI_ERROR(status))
+        goto out;
+
+    ptr = sig;
+    pkcs7 = d2i_PKCS7(NULL, (const unsigned char **)&ptr, (int)sig_len);
+    if (!pkcs7) {
+        status = EFI_SECURITY_VIOLATION;
+        goto out;
+    }
+
+    if (!PKCS7_type_is_signed(pkcs7)) {
+        status = EFI_SECURITY_VIOLATION;
+        goto out;
+    }
+
+    cert_store = X509_STORE_new();
+    if (!cert_store) {
+        status = EFI_DEVICE_ERROR;
+        goto out;
+    }
+
+    cert_store->verify_cb = X509_verify_cb;
+
+    if (!(X509_STORE_add_cert(cert_store, trusted_cert))) {
+        status = EFI_SECURITY_VIOLATION;
+        goto out;
+    }
+
+    data_bio = BIO_new(BIO_s_mem());
+    if (!data_bio) {
+        status = EFI_DEVICE_ERROR;
+        goto out;
+    }
+
+    if (BIO_write(data_bio, verify_buf, (int)verify_len) <= 0) {
+        status = EFI_SECURITY_VIOLATION;
+        goto out;
+    }
+
+    X509_STORE_set_flags(cert_store, X509_V_FLAG_PARTIAL_CHAIN);
+    X509_STORE_set_purpose(cert_store, X509_PURPOSE_ANY);
+
+    if (PKCS7_verify(pkcs7, NULL, cert_store, data_bio, NULL, PKCS7_BINARY))
+        status = EFI_SUCCESS;
+    else {
+        ERR_load_crypto_strings();
+        DBG("verify_error : %s\n", ERR_error_string(ERR_get_error(), NULL));
+        status = EFI_SECURITY_VIOLATION;
+    }
+
+out:
+    BIO_free(data_bio);
+    X509_STORE_free(cert_store);
+    PKCS7_free(pkcs7);
+    if (!wrapped)
+        free(sig);
+    return status;
+}
+
+/*
+ * Get the signer's certificates from PKCS#7 signed data.
+ * Adapted from edk2.
+ *
+ * The caller is responsible for free the pkcs7 context. certs should not be
+ * used after the context is freed.
+ */
+static EFI_STATUS
+pkcs7_get_signers(const uint8_t *p7data, UINTN p7_len,
+                  PKCS7 **pkcs7, STACK_OF(X509) **certs)
+{
+    bool wrapped;
+    uint8_t *ptr, *sig;
+    UINTN sig_len;
+    EFI_STATUS status;
+
+    status = wrap_pkcs7_data(p7data, p7_len, &wrapped, &sig, &sig_len);
+    if (EFI_ERROR(status))
+        goto out;
+
+    ptr = sig;
+    *pkcs7 = d2i_PKCS7(NULL, (const unsigned char **)&ptr, (int)sig_len);
+    if (!*pkcs7) {
+        status = EFI_SECURITY_VIOLATION;
+        goto out;
+    }
+
+    if (!PKCS7_type_is_signed(*pkcs7)) {
+        PKCS7_free(*pkcs7);
+        status = EFI_SECURITY_VIOLATION;
+        goto out;
+    }
+
+    *certs = PKCS7_get0_signers(*pkcs7, NULL, PKCS7_BINARY);
+    if (!*certs) {
+        PKCS7_free(*pkcs7);
+        status = EFI_SECURITY_VIOLATION;
+        goto out;
+    }
+
+    status = EFI_SUCCESS;
+
+out:
+    if (!wrapped)
+        free(sig);
+    return status;
+}
+
+/* Returns true iff b is later than a */
+static bool time_later(EFI_TIME *a, EFI_TIME *b)
+{
+    if (a->Year != b->Year)
+        return b->Year > a->Year;
+    else if (a->Month != b->Month)
+        return b->Month > a->Month;
+    else if (a->Day != b->Day)
+        return b->Day > a->Day;
+    else if (a->Hour != b->Hour)
+        return b->Hour > a->Hour;
+    else if (a->Minute != b->Minute)
+        return b->Minute > a->Minute;
+    else
+        return b->Second > a->Second;
+}
+
+/*
+ * Verify the authentication descriptor for a time based authentication
+ * variable.
+ *
+ * On success, payload_out and payload_len_out refer to the actual payload.
+ * The caller is responsible for freeing.
+ * digest is the digest of the signer's certificates.
+ * timestamp is the associated with the descriptor.
+ */
+static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
+                                  uint8_t *data, UINTN data_len,
+                                  char *guid, UINT32 attr, bool append,
+                                  struct efi_variable *cur,
+                                  uint8_t **payload_out, UINTN *payload_len_out,
+                                  uint8_t *digest, EFI_TIME *timestamp)
+{
+    uint8_t *ptr, *sig, *payload, *verify_buf = NULL;
+    EFI_VARIABLE_AUTHENTICATION_2 *d;
+    UINTN sig_len, verify_len, payload_len;
+    STACK_OF(X509) *certs;
+    X509 *top_level_cert;
+    PKCS7 *pkcs7 = NULL;
+    EFI_STATUS status;
+
+    if (data_len < sizeof(*d))
+        return EFI_SECURITY_VIOLATION;
+
+    d = (EFI_VARIABLE_AUTHENTICATION_2 *)data;
+
+    *timestamp = d->TimeStamp;
+    if ((timestamp->Pad1 != 0) ||
+            (timestamp->Nanosecond != 0) ||
+            (timestamp->TimeZone != 0) ||
+            (timestamp->Daylight != 0) ||
+            (timestamp->Pad2 != 0))
+        return EFI_SECURITY_VIOLATION;
+
+    if (!append && cur && !time_later(&cur->timestamp, timestamp))
+        return EFI_SECURITY_VIOLATION;
+
+    if ((d->AuthInfo.Hdr.wCertificateType != WIN_CERT_TYPE_EFI_GUID) ||
+            memcmp(d->AuthInfo.CertType, gEfiCertPkcs7Guid, GUID_LEN))
+        return EFI_SECURITY_VIOLATION;
+
+    sig_len = d->AuthInfo.Hdr.dwLength - offsetof(WIN_CERTIFICATE_UEFI_GUID, CertData);
+    if (sig_len > (data_len - offsetof(EFI_VARIABLE_AUTHENTICATION_2, AuthInfo.CertData)))
+        return EFI_SECURITY_VIOLATION;
+    /* XXX check for msha256OidValue */
+    sig = d->AuthInfo.CertData;
+
+    payload = sig + sig_len;
+    payload_len = data_len - offsetof(EFI_VARIABLE_AUTHENTICATION_2, AuthInfo) - d->AuthInfo.Hdr.dwLength;
+
+    /* VariableName, VendorGuid, Attributes, TimeStamp, Data */
+    verify_len = name_len + GUID_LEN + sizeof(UINT32) + sizeof(EFI_TIME) +
+                 payload_len;
+    verify_buf = malloc(verify_len);
+    if (!verify_buf)
+        return EFI_DEVICE_ERROR;
+
+    ptr = verify_buf;
+    memcpy(ptr, name, name_len);
+    ptr += name_len;
+    memcpy(ptr, guid, GUID_LEN);
+    ptr += GUID_LEN;
+    if (append)
+        attr |= EFI_VARIABLE_APPEND_WRITE;
+    memcpy(ptr, &attr, sizeof attr);
+    ptr += sizeof attr;
+    memcpy(ptr, &d->TimeStamp, sizeof d->TimeStamp);
+    ptr += sizeof d->TimeStamp;
+    memcpy(ptr, payload, payload_len);
+
+    status = pkcs7_get_signers(sig, sig_len, &pkcs7, &certs);
+    if (status != EFI_SUCCESS)
+        goto out;
+    top_level_cert = sk_X509_value(certs, sk_X509_num(certs) - 1);
+
+    status = sha256_sig(certs, top_level_cert, digest);
+    if (status != EFI_SUCCESS)
+        goto out;
+
+    if (cur) {
+        if (memcmp(digest, cur->cert, SHA256_DIGEST_SIZE)) {
+            status = EFI_SECURITY_VIOLATION;
+            goto out;
+        }
+    }
+
+    status = pkcs7_verify(sig, sig_len, top_level_cert, verify_buf, verify_len);
+    if (status == EFI_SUCCESS) {
+        *payload_len_out = payload_len;
+        *payload_out = malloc(payload_len);
+        if (*payload_out)
+            memcpy(*payload_out, payload, payload_len);
+        else
+            status = EFI_DEVICE_ERROR;
+    }
+
+out:
+    free(verify_buf);
+    PKCS7_free(pkcs7);
+    return status;
+}
+
 static void
 do_set_variable(uint8_t *comm_buf)
 {
@@ -299,6 +765,9 @@ do_set_variable(uint8_t *comm_buf)
     char guid[GUID_LEN];
     UINT32 attr;
     BOOLEAN at_runtime, append;
+    EFI_STATUS status;
+    uint8_t digest[SHA256_DIGEST_SIZE];
+    EFI_TIME timestamp;
 
     ptr = comm_buf;
     unserialize_uint32(&ptr); /* version */
@@ -328,10 +797,9 @@ do_set_variable(uint8_t *comm_buf)
         goto err;
     }
 
-    /* Authenticated variables are not supported for now. */
-    if (attr & EFI_VARIABLE_AUTHENTICATED_WRITE_ACCESS ||
-            attr & EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS) {
-        serialize_result(&ptr, EFI_INVALID_PARAMETER);
+    /* Authenticated write access is deprecated and is not supported. */
+    if (attr & EFI_VARIABLE_AUTHENTICATED_WRITE_ACCESS) {
+        serialize_result(&ptr, EFI_UNSUPPORTED);
         goto err;
     }
 
@@ -361,6 +829,34 @@ do_set_variable(uint8_t *comm_buf)
                 goto err;
             }
 
+            if (attr & EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS) {
+                uint8_t *payload;
+                UINTN payload_len;
+
+                /*
+                 * Authenticated variables cannot be deleted by setting no
+                 * access bits so ensure the bits are unchanged early.
+                 */
+                if (l->attributes != attr) {
+                    serialize_result(&ptr, EFI_INVALID_PARAMETER);
+                    goto err;
+                }
+
+                status = verify_auth_var(name, name_len,
+                                         data, data_len,
+                                         guid, attr, append,
+                                         l,
+                                         &payload, &payload_len,
+                                         digest, &timestamp);
+                if (status != EFI_SUCCESS) {
+                    serialize_result(&ptr, status);
+                    goto err;
+                }
+                free(data);
+                data = payload;
+                data_len = payload_len;
+            }
+
             if ((data_len == 0 && !append) || !(attr & EFI_VAR_ACCESS)) {
                 if (prev)
                     prev->next = l->next;
@@ -387,6 +883,9 @@ do_set_variable(uint8_t *comm_buf)
                         serialize_result(&ptr, EFI_DEVICE_ERROR);
                         goto err;
                     }
+                    if ((attr & EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS) &&
+                            time_later(&l->timestamp, &timestamp))
+                        l->timestamp = timestamp;
                     l->data = new_data;
                     memcpy(l->data + l->data_len, data, data_len);
                     free(data);
@@ -396,6 +895,8 @@ do_set_variable(uint8_t *comm_buf)
                         serialize_result(&ptr, EFI_OUT_OF_RESOURCES);
                         goto err;
                     }
+                    if (attr & EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS)
+                        l->timestamp = timestamp;
                     free(l->data);
                     l->data = data;
                     l->data_len = data_len;
@@ -421,6 +922,25 @@ do_set_variable(uint8_t *comm_buf)
             goto err;
         }
 
+        if (attr & EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS) {
+            uint8_t *payload;
+            UINTN payload_len;
+
+            status = verify_auth_var(name, name_len,
+                                     data, data_len,
+                                     guid, attr, append,
+                                     NULL,
+                                     &payload, &payload_len,
+                                     digest, &timestamp);
+            if (EFI_ERROR(status)) {
+                serialize_result(&ptr, status);
+                goto err;
+            }
+            free(data);
+            data = payload;
+            data_len = payload_len;
+        }
+
         if (get_space_usage() + name_len + data_len > TOTAL_LIMIT) {
             serialize_result(&ptr, EFI_OUT_OF_RESOURCES);
             goto err;
@@ -438,6 +958,10 @@ do_set_variable(uint8_t *comm_buf)
         l->data = data;
         l->data_len = data_len;
         l->attributes = attr;
+        if (attr & EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS) {
+            l->timestamp = timestamp;
+            memcpy(l->cert, digest, SHA256_DIGEST_SIZE);
+        }
         l->next = var_list;
         var_list = l;
         serialize_result(&ptr, EFI_SUCCESS);
