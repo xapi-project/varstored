@@ -5,5 +5,6 @@
 
 void dispatch_command(uint8_t *comm_buf);
 void load_list();
+bool setup_variables(void);
 
 #endif

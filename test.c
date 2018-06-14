@@ -37,13 +37,6 @@ static uint8_t tdata5[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
 #define BSIZ 1024 /* general buffer size */
 
-/* Abbrieviations */
-#define ATTR_B (EFI_VARIABLE_BOOTSERVICE_ACCESS)
-#define ATTR_R (EFI_VARIABLE_RUNTIME_ACCESS)
-#define ATTR_BR (EFI_VARIABLE_BOOTSERVICE_ACCESS|EFI_VARIABLE_RUNTIME_ACCESS)
-#define ATTR_BNV (EFI_VARIABLE_BOOTSERVICE_ACCESS|EFI_VARIABLE_NON_VOLATILE)
-#define ATTR_BRNV (EFI_VARIABLE_BOOTSERVICE_ACCESS|EFI_VARIABLE_RUNTIME_ACCESS|EFI_VARIABLE_NON_VOLATILE)
-
 static void reset_vars(void)
 {
     struct efi_variable *l, *tmp;

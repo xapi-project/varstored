@@ -85,9 +85,12 @@ typedef unsigned short CHAR16;
 ///
 #define EFI_VARIABLE_AUTHENTICATED_WRITE_ACCESS              0x00000010
 
-/* All the access bits */
-#define EFI_VAR_ACCESS (EFI_VARIABLE_RUNTIME_ACCESS | \
-                        EFI_VARIABLE_BOOTSERVICE_ACCESS)
+/* Abbrieviations */
+#define ATTR_B (EFI_VARIABLE_BOOTSERVICE_ACCESS)
+#define ATTR_R (EFI_VARIABLE_RUNTIME_ACCESS)
+#define ATTR_BR (EFI_VARIABLE_BOOTSERVICE_ACCESS|EFI_VARIABLE_RUNTIME_ACCESS)
+#define ATTR_BNV (EFI_VARIABLE_BOOTSERVICE_ACCESS|EFI_VARIABLE_NON_VOLATILE)
+#define ATTR_BRNV (EFI_VARIABLE_BOOTSERVICE_ACCESS|EFI_VARIABLE_RUNTIME_ACCESS|EFI_VARIABLE_NON_VOLATILE)
 
 typedef struct __attribute__((packed)) {
     UINT16 Year;
@@ -121,5 +124,23 @@ typedef struct __attribute__((packed)) {
 } EFI_VARIABLE_AUTHENTICATION_2;
 
 #define WIN_CERT_TYPE_EFI_GUID         0x0EF1
+
+typedef struct __attribute__((packed)) {
+    char SignatureOwner[GUID_LEN];
+    uint8_t SignatureData[1];
+} EFI_SIGNATURE_DATA;
+
+typedef struct __attribute__((packed)) {
+    char SignatureType[GUID_LEN];
+    UINT32 SignatureListSize;
+    UINT32 SignatureHeaderSize;
+    UINT32 SignatureSize;
+} EFI_SIGNATURE_LIST;
+
+typedef struct __attribute__((packed)) {
+    char SigType[GUID_LEN];
+    UINT32 SigHeaderSize;
+    UINT32 SigDataSize;
+} EFI_SIGNATURE_ITEM;
 
 #endif

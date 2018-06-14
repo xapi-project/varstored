@@ -750,6 +750,8 @@ main(int argc, char **argv, char **envp)
         function = 0;
     }
 
+    setup_variables();
+
     sigfillset(&block);
 
     memset(&sigterm_handler, 0, sizeof (struct sigaction));
