@@ -35,6 +35,8 @@
 #include "device.h"
 #include "pci.h"
 #include "handler.h"
+#include "backend.h"
+#include "option.h"
 
 #define mb() asm volatile ("" : : : "memory")
 
@@ -42,7 +44,9 @@ enum {
     VARSTORED_OPT_DOMAIN,
     VARSTORED_OPT_DEVICE,
     VARSTORED_OPT_FUNCTION,
-    VARSTORED_OPT_FILENAME,
+    VARSTORED_OPT_RESUME,
+    VARSTORED_OPT_BACKEND,
+    VARSTORED_OPT_ARG,
     VARSTORED_NR_OPTS
     };
 
@@ -50,7 +54,9 @@ static struct option varstored_option[] = {
     {"domain", 1, NULL, 0},
     {"device", 1, NULL, 0},
     {"function", 1, NULL, 0},
-    {"filename", 1, NULL, 0},
+    {"resume", 0, NULL, 0},
+    {"backend", 1, NULL, 0},
+    {"arg", 1, NULL, 0},
     {NULL, 0, NULL, 0}
 };
 
@@ -58,24 +64,32 @@ static const char *varstored_option_text[] = {
     "<domid>",
     "<device>",
     "<function>",
-    "<filename>",
-    NULL
+    NULL,
+    "<backend>",
+    "<name>:<val>",
 };
 
 static const char *prog;
 char *save_name;
+struct backend *db;
+bool opt_resume;
 
-static void
+static void __attribute__((noreturn))
 usage(void)
 {
     int i;
 
     fprintf(stderr, "Usage: %s <options>\n\n", prog);
 
-    for (i = 0; i < VARSTORED_NR_OPTS; i++)
-        fprintf(stderr, "\t--%s %s\n",
-                varstored_option[i].name,
-                varstored_option_text[i]);
+    for (i = 0; i < VARSTORED_NR_OPTS; i++) {
+        if (varstored_option[i].has_arg) {
+            fprintf(stderr, "\t--%s %s\n",
+                    varstored_option[i].name,
+                    varstored_option_text[i]);
+        } else {
+            fprintf(stderr, "\t--%s\n", varstored_option[i].name);
+        }
+    }
 
     fprintf(stderr, "\n");
 
@@ -717,6 +731,7 @@ main(int argc, char **argv, char **envp)
     char            *domain_str;
     char            *device_str;
     char            *function_str;
+    char            *ptr;
     int             index;
     char            *end;
     domid_t         domid;
@@ -759,9 +774,35 @@ main(int argc, char **argv, char **envp)
             function_str = optarg;
             break;
 
-        case VARSTORED_OPT_FILENAME:
-            save_name = optarg;
-            load_list();
+        case VARSTORED_OPT_RESUME:
+            opt_resume = true;
+            break;
+
+        case VARSTORED_OPT_BACKEND:
+            if (!strcmp(optarg, "xapidb")) {
+                db = &xapidb;
+            } else {
+                fprintf(stderr, "Invalid backend '%s'\n", optarg);
+                usage();
+            }
+            break;
+
+        case VARSTORED_OPT_ARG:
+            if (!db) {
+                fprintf(stderr, "Must set backend before backend args\n");
+                usage();
+            }
+            ptr = strchr(optarg, ':');
+            if (!ptr) {
+                fprintf(stderr, "Invalid argument '%s'\n", optarg);
+                usage();
+            }
+            *ptr = '\0';
+            ptr++;
+            if (!db->parse_arg(optarg, ptr)) {
+                fprintf(stderr, "Invalid argument '%s:%s'\n", optarg, ptr);
+                usage();
+            }
             break;
 
         default:
@@ -771,7 +812,9 @@ main(int argc, char **argv, char **envp)
     }
 
     if (domain_str == NULL ||
-        device_str == NULL) {
+        device_str == NULL ||
+        db == NULL ||
+        !db->check_args()) {
         usage();
         /*NOTREACHED*/
     }

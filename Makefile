@@ -3,7 +3,8 @@ TARGET = varstored
 OBJS :=	device.o \
 	handler.o \
 	pci.o \
-	varstored.o
+	varstored.o \
+	xapidb.o
 
 CFLAGS  = -I$(shell pwd)/include
 
