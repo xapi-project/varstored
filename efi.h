@@ -150,4 +150,6 @@ typedef struct __attribute__((packed)) {
     UINT32 SigDataSize;
 } EFI_SIGNATURE_ITEM;
 
+#define SHA256_DIGEST_SIZE 32
+
 #endif

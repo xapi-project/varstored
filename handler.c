@@ -13,9 +13,8 @@
 
 #include "debug.h"
 #include "efi.h"
+#include "serialize.h"
 #include "handler.h"
-
-#define SHA256_DIGEST_SIZE 32
 
 /* Some values from edk2. */
 char gEfiCertPkcs7Guid[] = {0x9d,0xd2,0xaf,0x4a,0xdf,0x68,0xee,0x49,0x8a,0xa9,0x34,0x7d,0x37,0x56,0x65,0xa7};
@@ -55,10 +54,6 @@ uint8_t EFI_SIGNATURE_SUPPORT_NAME[] = {'S',0,'i',0,'g',0,'n',0,'a',0,'t',0,'u',
 uint8_t EFI_IMAGE_SECURITY_DATABASE[] = {'d',0,'b',0};
 uint8_t EFI_IMAGE_SECURITY_DATABASE1[] = {'d',0,'b',0,'x',0};
 uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
-
-#define NAME_LIMIT 4096 /* Maximum length of name */
-#define DATA_LIMIT 57344 /* Maximum length of a single variable */
-#define TOTAL_LIMIT 65536 /* Maximum total storage */
 /*
  * A single variable takes up a minimum number of bytes.
  * This ensures a suitably low limit on the number of variables that can be
@@ -66,144 +61,8 @@ uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
  */
 #define VARIABLE_SIZE_MIN 64
 
-enum command_t {
-    COMMAND_GET_VARIABLE,
-    COMMAND_SET_VARIABLE,
-    COMMAND_GET_NEXT_VARIABLE,
-    COMMAND_QUERY_VARIABLE_INFO,
-};
-
-struct efi_variable {
-    uint8_t *name;
-    UINTN name_len;
-    uint8_t *data;
-    UINTN data_len;
-    char guid[GUID_LEN];
-    UINT32 attributes;
-    EFI_TIME timestamp;
-    uint8_t cert[SHA256_DIGEST_SIZE];
-    struct efi_variable *next;
-};
-
-static struct efi_variable *var_list;
+struct efi_variable *var_list;
 bool secure_boot_enable;
-
-static enum command_t
-unserialize_command(uint8_t **ptr)
-{
-    UINT32 data;
-
-    memcpy(&data, *ptr, sizeof data);
-    *ptr += sizeof data;
-
-    return (enum command_t)data;
-}
-
-static void
-serialize_data(uint8_t **ptr, const uint8_t *data, UINTN data_len)
-{
-    memcpy(*ptr, &data_len, sizeof data_len);
-    *ptr += sizeof data_len;
-    memcpy(*ptr, data, data_len);
-    *ptr += data_len;
-}
-
-static void
-serialize_result(uint8_t **ptr, EFI_STATUS status)
-{
-    memcpy(*ptr, &status, sizeof status);
-    *ptr += sizeof status;
-}
-
-static void
-serialize_guid(uint8_t **ptr, const char *guid)
-{
-  memcpy(*ptr, guid, GUID_LEN);
-  *ptr += GUID_LEN;
-}
-
-static void
-serialize_uintn(uint8_t **ptr, UINTN var)
-{
-  memcpy(*ptr, &var, sizeof var);
-  *ptr += sizeof var;
-}
-
-static void
-serialize_uint32(uint8_t **ptr, UINT32 var)
-{
-  memcpy(*ptr, &var, sizeof var);
-  *ptr += sizeof var;
-}
-
-static void
-serialize_uint64(uint8_t **ptr, UINT64 var)
-{
-  memcpy(*ptr, &var, sizeof var);
-  *ptr += sizeof var;
-}
-
-static uint8_t *
-unserialize_data(uint8_t **ptr, UINTN *len, UINTN limit)
-{
-    uint8_t *data;
-
-    memcpy(len, *ptr, sizeof *len);
-    *ptr += sizeof *len;
-
-    if (*len > limit || *len == 0)
-        return NULL;
-
-    data = malloc(*len);
-    if (!data)
-        return NULL;
-
-    memcpy(data, *ptr, *len);
-    *ptr += *len;
-
-    return data;
-}
-
-static void
-unserialize_guid(uint8_t **ptr, char *guid)
-{
-    memcpy(guid, *ptr, GUID_LEN);
-    *ptr += GUID_LEN;
-}
-
-static UINTN
-unserialize_uintn(uint8_t **ptr)
-{
-    UINTN ret;
-
-    memcpy(&ret, *ptr, sizeof ret);
-    *ptr += sizeof ret;
-
-    return ret;
-}
-
-static BOOLEAN
-unserialize_boolean(uint8_t **ptr)
-{
-    BOOLEAN ret;
-
-    memcpy(&ret, *ptr, sizeof ret);
-    *ptr += sizeof ret;
-
-    return ret;
-}
-
-static UINT32
-unserialize_uint32(uint8_t **ptr)
-{
-    UINT32 ret;
-
-    memcpy(&ret, *ptr, sizeof ret);
-    *ptr += sizeof ret;
-
-    return ret;
-}
-
 extern char *save_name;
 
 static void
