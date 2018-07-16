@@ -11,6 +11,7 @@
 #include <openssl/pkcs7.h>
 #include <openssl/err.h>
 
+#include "backend.h"
 #include "debug.h"
 #include "efi.h"
 #include "serialize.h"
@@ -63,74 +64,6 @@ uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
 
 struct efi_variable *var_list;
 bool secure_boot_enable;
-extern char *save_name;
-
-static void
-save_list(void)
-{
-    struct efi_variable *l;
-    FILE *f = fopen(save_name, "w");
-
-    if (!f) {
-        DBG("failed to open %s %s\n", save_name, strerror(errno));
-        abort();
-    }
-
-    l = var_list;
-    while (l) {
-        if ((l->attributes & EFI_VARIABLE_NON_VOLATILE)) {
-            DBG("write variable to file %lu %lu\n", l->name_len, l->data_len);
-            fwrite(&l->name_len, sizeof l->name_len, 1, f);
-            fwrite(l->name, 1, l->name_len, f);
-            fwrite(&l->data_len, sizeof l->data_len, 1, f);
-            fwrite(l->data, 1, l->data_len, f);
-            fwrite(l->guid, 1, GUID_LEN, f);
-            fwrite(&l->attributes, sizeof l->attributes, 1, f);
-        }
-        l = l->next;
-    }
-
-    fclose(f);
-}
-
-void
-load_list(void)
-{
-    struct efi_variable *l;
-    FILE *f = fopen(save_name, "r");
-
-    if (!f) {
-        DBG("failed to open %s : %s\n", save_name, strerror(errno));
-        return;
-    }
-
-    DBG("opened %s\n", save_name);
-
-    for (;;) {
-        UINTN name_len;
-
-        if (fread(&name_len, sizeof name_len, 1, f) != 1)
-            break;
-
-        l = malloc(sizeof *l);
-        if (!l)
-            abort(); /* XXX */
-
-        l->name_len = name_len;
-        l->name = malloc(l->name_len);
-        fread(l->name, 1, l->name_len, f);
-        fread(&l->data_len, sizeof l->data_len, 1, f);
-        l->data = malloc(l->data_len);
-        fread(l->data, 1, l->data_len, f);
-        fread(l->guid, 1, GUID_LEN, f);
-        fread(&l->attributes, 1, sizeof l->attributes, f);
-        DBG("read variable from file: namelen %lu datalen %lu\n", l->name_len, l->data_len);
-        l->next = var_list;
-        var_list = l;
-    }
-
-    fclose(f);
-}
 
 static uint64_t
 get_space_usage(void)
@@ -1418,7 +1351,7 @@ do_set_variable(uint8_t *comm_buf)
             free(name);
             serialize_result(&ptr, EFI_SUCCESS);
             if (should_save)
-                save_list();
+                db->set_variable();
             return;
         }
         prev = l;
@@ -1484,7 +1417,7 @@ do_set_variable(uint8_t *comm_buf)
         var_list = l;
         serialize_result(&ptr, EFI_SUCCESS);
         if ((attr & EFI_VARIABLE_NON_VOLATILE))
-            save_list();
+            db->set_variable();
     }
 
     return;

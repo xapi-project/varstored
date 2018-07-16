@@ -69,8 +69,9 @@ static const char *varstored_option_text[] = {
     "<name>:<val>",
 };
 
+static sig_atomic_t run_main_loop = 1;
+
 static const char *prog;
-char *save_name;
 struct backend *db;
 bool opt_resume;
 
@@ -398,7 +399,10 @@ varstored_sigterm(int num)
 
     varstored_teardown();
 
-    exit(0);
+    if (num == SIGTERM)
+        run_main_loop = 0;
+    else
+        exit(0);
 }
 
 static struct sigaction sigusr1_handler;
@@ -842,7 +846,14 @@ main(int argc, char **argv, char **envp)
     }
 
     initialize_secure_boot(domid);
-    setup_variables();
+
+    if (opt_resume) {
+        if (!db->resume())
+            exit(1);
+    } else {
+        if (!db->init())
+            exit(1);
+    }
 
     sigfillset(&block);
 
@@ -879,8 +890,11 @@ main(int argc, char **argv, char **envp)
     pfd.events = POLLIN | POLLERR | POLLHUP;
     pfd.revents = 0;
 
-    for (;;) {
+    while (run_main_loop) {
         rc = poll(&pfd, 1, 5000);
+
+        if (!run_main_loop)
+            break;
 
         if (rc > 0 && pfd.revents & POLLIN)
             varstored_poll_iopages();
@@ -888,6 +902,9 @@ main(int argc, char **argv, char **envp)
         if (rc < 0 && errno != EINTR)
             break;
     }
+
+    if (!db->save())
+        return 1;
 
     return 0;
 }
