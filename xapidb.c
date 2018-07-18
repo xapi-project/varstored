@@ -4,9 +4,13 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <unistd.h>
 
+#include <libxml/parser.h>
+#include <libxml/xpath.h>
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 
@@ -63,7 +67,7 @@ xapidb_check_args(void)
  * the caller. Returns the length of the buffer on success otherwise 0.
  */
 static size_t
-serialize_variables(uint8_t **out)
+serialize_variables(uint8_t **out, bool only_nv)
 {
     struct efi_variable *l;
     uint8_t *buf, *ptr;
@@ -71,6 +75,11 @@ serialize_variables(uint8_t **out)
 
     l = var_list;
     while (l) {
+        if (only_nv && !(l->attributes & EFI_VARIABLE_NON_VOLATILE)) {
+            l = l->next;
+            continue;
+        }
+
         data_len += sizeof(l->name_len) + l->name_len;
         data_len += sizeof(l->data_len) + l->data_len;
         data_len += GUID_LEN;
@@ -97,6 +106,11 @@ serialize_variables(uint8_t **out)
     serialize_uintn(&ptr, data_len);
 
     while (l) {
+        if (only_nv && !(l->attributes & EFI_VARIABLE_NON_VOLATILE)) {
+            l = l->next;
+            continue;
+        }
+
         serialize_data(&ptr, l->name, l->name_len);
         serialize_data(&ptr, l->data, l->data_len);
         serialize_guid(&ptr, l->guid);
@@ -250,7 +264,7 @@ xapidb_save(void)
     if (!arg_save)
         return true;
 
-    len = serialize_variables(&buf);
+    len = serialize_variables(&buf, false);
     if (len == 0)
         return false;
 
@@ -334,10 +348,353 @@ xapidb_resume(void)
 }
 
 static bool
+base64_encode(const uint8_t *buf, size_t len, char **out)
+{
+    BIO *b64, *bio;
+    char *ptr;
+    int n;
+    long out_len;
+    size_t total = 0;
+
+    bio = BIO_new(BIO_s_mem());
+    if (!bio) {
+        /* DBG("Failed to create BIO\n"); */
+        return false;
+    }
+    b64 = BIO_new(BIO_f_base64());
+    if (!b64) {
+        /* DBG("Failed to create BIO\n"); */
+        BIO_free_all(bio);
+        return false;
+    }
+    BIO_push(b64, bio);
+    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
+    BIO_set_close(bio, BIO_CLOSE);
+
+    while ((len - total) > 0) {
+        n = BIO_write(b64, buf + total, (int)(len - total));
+        if (n <= 0)
+            break;
+        total += n;
+    }
+
+    BIO_flush(b64);
+    out_len = BIO_get_mem_data(b64, &ptr);
+    *out = malloc(out_len + 1);
+    if (!*out) {
+        BIO_free_all(b64);
+        return false;
+    }
+    memcpy(*out, ptr, out_len);
+    (*out)[out_len] = '\0';
+
+    BIO_free_all(b64);
+
+    return total == len ? true : false;
+}
+
+#define XAPI_SOCKET "/var/lib/xcp/xapi"
+
+#define HTTP_STATUS_OK 200
+
+#define HTTP_POST \
+    "POST / HTTP/1.1\r\n" \
+    "Host: _var_lib_xcp_xapi\r\n" \
+    "Accept-Encoding: identity\r\n" \
+    "User-Agent: varstored/0.1\r\n" \
+    "Connection: close\r\n" \
+    "Content-Type: text/xml\r\n" \
+    "Content-Length: %lu\r\n" \
+    "\r\n" \
+    "%s"
+
+#define LOGIN_CALL \
+    "<?xml version='1.0'?>" \
+    "<methodCall>" \
+      "<methodName>session.login_with_password</methodName>" \
+      "<params>" \
+        "<param><value><string>root</string></value></param>" \
+        "<param><value><string></string></value></param>" \
+        "<param><value><string></string></value></param>" \
+        "<param><value><string></string></value></param>" \
+      "</params>" \
+    "</methodCall>"
+
+#define VM_GET_BY_UUID_CALL \
+    "<?xml version='1.0'?>" \
+    "<methodCall>" \
+      "<methodName>VM.get_by_uuid</methodName>" \
+      "<params>" \
+        "<param><value><string>%s</string></value></param>" \
+        "<param><value><string>%s</string></value></param>" \
+      "</params>" \
+    "</methodCall>"
+
+#define VM_REMOVE_FROM_PLATFORM_CALL \
+    "<?xml version='1.0'?>" \
+    "<methodCall>" \
+      "<methodName>VM.remove_from_NVRAM</methodName>" \
+      "<params>" \
+        "<param><value><string>%s</string></value></param>" \
+        "<param><value><string>%s</string></value></param>" \
+        "<param><value><string>EFI-variables</string></value></param>" \
+      "</params>" \
+    "</methodCall>"
+
+#define VM_ADD_TO_PLATFORM_CALL \
+    "<?xml version='1.0'?>" \
+    "<methodCall>" \
+      "<methodName>VM.add_to_NVRAM</methodName>" \
+      "<params>" \
+        "<param><value><string>%s</string></value></param>" \
+        "<param><value><string>%s</string></value></param>" \
+        "<param><value><string>EFI-variables</string></value></param>" \
+        "<param><value><string>%s</string></value></param>" \
+      "</params>" \
+    "</methodCall>"
+
+#define LOGOUT_CALL \
+    "<?xml version='1.0'?>" \
+    "<methodCall>" \
+      "<methodName>session.logout</methodName>" \
+      "<params>" \
+        "<param><value><string>%s</string></value></param>" \
+      "</params>" \
+    "</methodCall>"
+
+static bool
+write_all(int fd, const char *buf, size_t remaining)
+{
+    ssize_t ret;
+
+    while (remaining > 0) {
+        ret = write(fd, buf, remaining < BUFSIZ ? remaining : BUFSIZ);
+        if (ret < 0)
+            return false;
+        if (ret == 0)
+            break;
+        remaining -= ret;
+        buf += ret;
+    }
+
+    return true;
+}
+
+static size_t read_all(int fd, char *buf, size_t limit)
+{
+    ssize_t ret;
+    size_t total = 0, remaining;
+
+    for (;;) {
+        remaining = limit - total - 1;
+        ret = read(fd, buf, remaining < BUFSIZ ? remaining : BUFSIZ);
+        if (ret <= 0)
+            break;
+        total += ret;
+        buf += ret;
+    }
+
+    *buf = '\0';
+
+    return total;
+}
+
+static int
+xmlrpc_call(char **response, const char *fmt, ...)
+{
+    va_list ap;
+    struct sockaddr_un addr;
+    int fd, status;
+    size_t n;
+    char *ptr, *request, *content;
+    char buf[1024];
+
+    va_start(ap, fmt);
+    if (vasprintf(&content, fmt, ap) == -1) {
+        va_end(ap);
+        return -1;
+    }
+    va_end(ap);
+
+    if (asprintf(&request, HTTP_POST, strlen(content), content) == -1) {
+        free(content);
+        return -1;
+    }
+    free(content);
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, XAPI_SOCKET, sizeof(addr.sun_path) - 1);
+
+    fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd == -1) {
+        free(request);
+        return -1;
+    }
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
+        free(request);
+        close(fd);
+        return -1;
+    }
+
+    if (!write_all(fd, request, strlen(request))) {
+        free(request);
+        close(fd);
+        return -1;
+    }
+    free(request);
+
+    n = read_all(fd, buf, sizeof(buf));
+    close(fd);
+    if (n == 0)
+        return -1;
+
+    ptr = strchr(buf, ' ');
+    if (!ptr)
+        return -1;
+    status = atoi(ptr);
+
+    ptr = strstr(buf, "\r\n\r\n");
+    if (!ptr)
+        return -1;
+
+    *response = strdup(ptr + strlen("\r\n\r\n"));
+
+    return status;
+}
+
+static bool
+xmlrpc_process(char *response, char **result)
+{
+    xmlDocPtr doc = NULL;
+    xmlNodePtr node = NULL;
+    xmlXPathContextPtr xpath_ctx = NULL;
+    xmlXPathObjectPtr xpath_obj = NULL;
+    xmlChar *content = NULL;
+    bool ret = false;
+
+    doc = xmlReadMemory(response, strlen(response), "noname.xml", NULL, 0);
+    if (!doc)
+        goto out;
+    xpath_ctx = xmlXPathNewContext(doc);
+    if (!xpath_ctx)
+        goto out;
+
+    xpath_obj = xmlXPathEvalExpression(
+        BAD_CAST "/methodResponse/params/param/value/struct/member[1]/value",
+        xpath_ctx);
+    if (!xpath_obj || !xpath_obj->nodesetval || xpath_obj->nodesetval->nodeNr == 0)
+        goto out;
+    node = xpath_obj->nodesetval->nodeTab[0];
+    content = xmlNodeGetContent(node);
+    if (strcmp((char *)content, "Success"))
+        goto out;
+
+    if (result) {
+        xmlFree(content);
+        content = NULL;
+        xmlXPathFreeObject(xpath_obj);
+        xpath_obj = xmlXPathEvalExpression(
+            BAD_CAST "/methodResponse/params/param/value/struct/member[2]/value",
+            xpath_ctx);
+        if (!xpath_obj || !xpath_obj->nodesetval || xpath_obj->nodesetval->nodeNr == 0)
+            goto out;
+        node = xpath_obj->nodesetval->nodeTab[0];
+        content = xmlNodeGetContent(node);
+        *result = strdup((char *)content);
+    }
+
+    ret = true;
+
+out:
+    xmlFree(content);
+    xmlXPathFreeObject(xpath_obj);
+    xmlXPathFreeContext(xpath_ctx);
+    xmlFreeDoc(doc);
+    return ret;
+}
+
+static bool
+send_to_xapi(char *uuid, char *data)
+{
+    int status;
+    bool ret = false;
+    char *session_ref = NULL, *vm_ref = NULL, *response = NULL;
+
+    status = xmlrpc_call(&response, LOGIN_CALL);
+    if (status != HTTP_STATUS_OK)
+        goto out;
+    if (!xmlrpc_process(response, &session_ref))
+        goto out;
+    free(response);
+    response = NULL;
+
+    status = xmlrpc_call(&response, VM_GET_BY_UUID_CALL, session_ref, uuid);
+    if (status != HTTP_STATUS_OK)
+        goto out;
+    if (!xmlrpc_process(response, &vm_ref))
+        goto out;
+    free(response);
+    response = NULL;
+
+    status = xmlrpc_call(&response, VM_REMOVE_FROM_PLATFORM_CALL, session_ref, vm_ref);
+    if (status != HTTP_STATUS_OK)
+        goto out;
+    if (!xmlrpc_process(response, NULL))
+        goto out;
+    free(response);
+    response = NULL;
+
+    status = xmlrpc_call(&response, VM_ADD_TO_PLATFORM_CALL, session_ref, vm_ref, data);
+    if (status != HTTP_STATUS_OK)
+        goto out;
+    if (!xmlrpc_process(response, NULL))
+        goto out;
+    free(response);
+    response = NULL;
+
+    status = xmlrpc_call(&response, LOGOUT_CALL, session_ref);
+    if (status != HTTP_STATUS_OK)
+        goto out;
+    if (!xmlrpc_process(response, NULL))
+        goto out;
+    free(response);
+    response = NULL;
+
+    ret = true;
+
+out:
+    free(session_ref);
+    free(vm_ref);
+    free(response);
+    return ret;
+}
+
+static bool
 xapidb_set_variable(void)
 {
-    /* Unimplemented */
-    return 0;
+    uint8_t *buf;
+    char *encoded;
+    size_t len;
+    bool ret;
+
+    if (!arg_uuid)
+        return true;
+
+    len = serialize_variables(&buf, true);
+    if (len == 0)
+        return false;
+
+    if (!base64_encode(buf, len, &encoded)) {
+        free(buf);
+        return false;
+    }
+    free(buf);
+
+    ret = send_to_xapi(arg_uuid, encoded);
+    free(encoded);
+
+    return ret;
 }
 
 struct backend xapidb = {
