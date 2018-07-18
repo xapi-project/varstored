@@ -7,6 +7,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+
 #include "backend.h"
 #include "debug.h"
 #include "efi.h"
@@ -150,8 +153,91 @@ unserialize_variables(uint8_t *buf, size_t count)
 static bool
 xapidb_init(void)
 {
-    /* Unimplemented */
-    return 0;
+    FILE *f;
+    BIO *bio, *b64;
+    struct stat st;
+    uint8_t *buf, *ptr;
+    uint32_t version;
+    size_t count;
+    int max_len, n, total = 0;
+
+    if (!arg_init)
+        return true;
+
+    f = fopen(arg_init, "r");
+    if (!f) {
+        DBG("Failed to open '%s'\n", arg_init);
+        return false;
+    }
+
+    if (fstat(fileno(f), &st) == -1 || st.st_size > MAX_FILE_SIZE) {
+        DBG("Init file size is invalid\n");
+        fclose(f);
+        return false;
+    }
+    max_len = st.st_size * 3 / 4;
+
+    buf = malloc(max_len + 1);
+    if (!buf) {
+        DBG("Failed to allocate memory\n");
+        fclose(f);
+        return false;
+    }
+
+    bio = BIO_new_fp(f, BIO_CLOSE);
+    if (!bio) {
+        DBG("Failed to create BIO\n");
+        free(buf);
+        fclose(f);
+        return false;
+    }
+    b64 = BIO_new(BIO_f_base64());
+    if (!b64) {
+        DBG("Failed to create BIO\n");
+        BIO_free_all(bio);
+        return false;
+    }
+    BIO_push(b64, bio);
+    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
+
+    for (;;) {
+        n = BIO_read(b64, buf + total, max_len - total);
+        if (n <= 0)
+            break;
+        total += n;
+    }
+    buf[total] = '\0';
+
+    BIO_free_all(b64);
+
+    if (total < DB_HEADER_LEN) {
+        DBG("Init file size is invalid\n");
+        free(buf);
+        return false;
+    }
+
+    ptr = buf;
+    if (memcmp(ptr, DB_MAGIC, strlen(DB_MAGIC))) {
+        DBG("Invalid init magic\n");
+        free(buf);
+        return false;
+    }
+    ptr += strlen(DB_MAGIC);
+
+    version = unserialize_uint32(&ptr);
+    if (version != DB_VERSION) {
+        DBG("Unsupported init version\n");
+        free(buf);
+        return false;
+    }
+
+    count = unserialize_uintn(&ptr);
+    unserialize_uintn(&ptr); /* data_len */
+
+    unserialize_variables(ptr, count);
+    free(buf);
+
+    return true;
 }
 
 static bool
@@ -241,7 +327,6 @@ xapidb_resume(void)
 
     count = unserialize_uintn(&ptr);
     unserialize_uintn(&ptr); /* data_len */
-
     unserialize_variables(ptr, count);
     free(buf);
 
