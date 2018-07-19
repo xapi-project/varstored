@@ -29,6 +29,7 @@
 
 #include <xenctrl.h>
 #include <xen/hvm/ioreq.h>
+#include <xenstore.h>
 
 #include "debug.h"
 #include "device.h"
@@ -663,6 +664,30 @@ varstored_poll_iopages(void)
     }
 }
 
+static void initialize_secure_boot(domid_t domid)
+{
+    char path[64];
+    struct xs_handle *handle = xs_open(0);
+    char *s;
+
+    snprintf(path, sizeof(path), "/local/domain/%u/platform/secureboot", domid);
+    if (!handle)
+    {
+        fprintf(stderr, "Could not open connection to xenstored: %d, %s\n", errno, strerror(errno));
+        exit(1);
+    }
+    s = xs_read(handle, XBT_NULL, path, NULL);
+
+    secure_boot_enable = s && !strcmp(s, "true");
+
+    if (secure_boot_enable)
+        DBG("SECURE_BOOT_ON\n");
+    else
+        DBG("SECURE_BOOT_OFF\n");
+    xs_close(handle);
+    free(s);
+}
+
 int
 main(int argc, char **argv, char **envp)
 {
@@ -750,6 +775,7 @@ main(int argc, char **argv, char **envp)
         function = 0;
     }
 
+    initialize_secure_boot(domid);
     setup_variables();
 
     sigfillset(&block);

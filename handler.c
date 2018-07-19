@@ -86,6 +86,7 @@ struct efi_variable {
 };
 
 static struct efi_variable *var_list;
+bool secure_boot_enable;
 
 static enum command_t
 unserialize_command(uint8_t **ptr)
@@ -1165,8 +1166,7 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
                                            sizeof(setup_mode),
                                            ATTR_BR);
 
-            /* XXX get this value from the toolstack */
-            secure_boot = 1;
+            secure_boot = secure_boot_enable;
             status = internal_set_variable(EFI_SECURE_BOOT_MODE_NAME,
                                            sizeof(EFI_SECURE_BOOT_MODE_NAME),
                                            gEfiGlobalVariableGuid,
@@ -1786,7 +1786,7 @@ setup_variables(void)
         setup_mode = 1;
     } else if (status == EFI_SUCCESS) {
         free(data);
-        secure_boot = 1; /* XXX get this from the toolstack */
+        secure_boot = secure_boot_enable;
     } else {
         return false;
     }
