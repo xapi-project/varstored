@@ -402,13 +402,13 @@ varstored_sigusr1(int num)
 static int
 varstored_initialize(domid_t domid, unsigned int device, unsigned int function)
 {
-    int             rc;
-    xc_dominfo_t    dominfo;
-    unsigned long   pfn;
-    unsigned long   buf_pfn;
-    evtchn_port_t   port;
-    evtchn_port_t   buf_port;
-    int             i;
+    int rc, i, subcount = 0, first = 1;
+    uint64_t number = 0;
+    xc_dominfo_t dominfo;
+    unsigned long pfn;
+    unsigned long buf_pfn;
+    evtchn_port_t port;
+    evtchn_port_t buf_port;
 
     varstored_state.domid = domid;
 
@@ -425,6 +425,29 @@ varstored_initialize(domid_t domid, unsigned int device, unsigned int function)
     varstored_state.vcpus = dominfo.max_vcpu_id + 1;
 
     DBG("%d vCPU(s)\n", varstored_state.vcpus);
+
+    do {
+        rc = xc_hvm_param_get(varstored_state.xch, varstored_state.domid,
+                              HVM_PARAM_NR_IOREQ_SERVER_PAGES, &number);
+
+        if (rc < 0) {
+            DBG("xc_hvm_param_get failed: %d, %s", errno, strerror(errno));
+            exit(1);
+        }
+
+        if (first || number > 0)
+            DBG("HVM_PARAM_NR_IOREQ_SERVER_PAGES = %ld\n", number);
+        first = 0;
+
+        if (number == 0) {
+            if (!subcount)
+                DBG("Waiting for ioreq server");
+            usleep(100000);
+            subcount++;
+            if (subcount > 10)
+                subcount = 0;
+        }
+    } while (number == 0);
 
     rc = xc_hvm_create_ioreq_server(varstored_state.xch, varstored_state.domid, 1,
                                     &varstored_state.ioservid);
