@@ -31,7 +31,9 @@
 
 /* Path to the file containing the initial data from XAPI. */
 static char *arg_init;
-/* Path to the file used for saving / resuming. */
+/* Path to the file used for resuming. */
+static char *arg_resume;
+/* Path to the file used for saving. */
 static char *arg_save;
 /* The VM's uuid. Used for saving to the XAPI db. */
 static char *arg_uuid;
@@ -41,6 +43,8 @@ xapidb_parse_arg(const char *name, const char *val)
 {
     if (!strcmp(name, "init"))
         arg_init = strdup(val);
+    else if (!strcmp(name, "resume"))
+        arg_resume = strdup(val);
     else if (!strcmp(name, "save"))
         arg_save = strdup(val);
     else if (!strcmp(name, "uuid"))
@@ -56,6 +60,10 @@ xapidb_check_args(void)
 {
     if (opt_resume && arg_init) {
         fprintf(stderr, "Backend arg 'init' is invalid when resuming\n");
+        return false;
+    }
+    if (!opt_resume && arg_resume) {
+        fprintf(stderr, "Backend arg 'resume' is invalid when not resuming\n");
         return false;
     }
 
@@ -294,12 +302,12 @@ xapidb_resume(void)
     uint32_t version;
     size_t count;
 
-    if (!arg_save)
+    if (!arg_resume)
         return true;
 
-    f = fopen(arg_save, "r");
+    f = fopen(arg_resume, "r");
     if (!f) {
-        DBG("Failed to open '%s'\n", arg_save);
+        DBG("Failed to open '%s'\n", arg_resume);
         return false;
     }
 
@@ -317,7 +325,7 @@ xapidb_resume(void)
         return false;
     }
     if (fread(buf, 1, st.st_size, f) != st.st_size) {
-        DBG("Failed to read from '%s'\n", arg_save);
+        DBG("Failed to read from '%s'\n", arg_resume);
         free(buf);
         fclose(f);
         return false;
