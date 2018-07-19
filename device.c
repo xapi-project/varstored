@@ -149,7 +149,6 @@ fail1:
 void
 device_teardown(void)
 {
-    pci_bar_deregister(1);
     pci_bar_deregister(0);
     pci_device_deregister();
 }
