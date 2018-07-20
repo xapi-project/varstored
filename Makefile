@@ -37,7 +37,7 @@ $(TARGET): $(LIBS) $(OBJS)
 	gcc -o $@ $(CFLAGS) -c $<
 
 check:
-	gcc -o test test.c $$(pkg-config --cflags --libs glib-2.0)
+	gcc -Wall -o test test.c $$(pkg-config --cflags --libs glib-2.0) -lcrypto
 	./test
 
 .PHONY: check

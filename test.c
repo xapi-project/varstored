@@ -552,14 +552,7 @@ static void test_set_variable_attr(void)
                       ATTR_B|EFI_VARIABLE_AUTHENTICATED_WRITE_ACCESS, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
-    g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
-
-    /* time based authenticated write access is not supported */
-    call_set_variable(tname1, strlen(tname1), tguid1, tdata1, sizeof tdata1,
-                      ATTR_B|EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS, 0);
-    ptr = buf;
-    status = unserialize_uintn(&ptr);
-    g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
+    g_assert_cmpuint(status, ==, EFI_UNSUPPORTED);
 
     /* runtime without boottime access is invalid */
     call_set_variable(tname1, strlen(tname1), tguid1, tdata1, sizeof tdata1,
