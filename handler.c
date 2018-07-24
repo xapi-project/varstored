@@ -100,7 +100,7 @@ unserialize_command(uint8_t **ptr)
 }
 
 static void
-serialize_data(uint8_t **ptr, uint8_t *data, UINTN data_len)
+serialize_data(uint8_t **ptr, const uint8_t *data, UINTN data_len)
 {
     memcpy(*ptr, &data_len, sizeof data_len);
     *ptr += sizeof data_len;
@@ -116,7 +116,7 @@ serialize_result(uint8_t **ptr, EFI_STATUS status)
 }
 
 static void
-serialize_guid(uint8_t **ptr, char *guid)
+serialize_guid(uint8_t **ptr, const char *guid)
 {
   memcpy(*ptr, guid, GUID_LEN);
   *ptr += GUID_LEN;
