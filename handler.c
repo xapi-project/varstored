@@ -794,7 +794,7 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
                                        sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
                                        gEfiGlobalVariableGuid,
                                        &var_data, &var_len);
-        if (!status) {
+        if (status != EFI_SUCCESS) {
             status = EFI_SECURITY_VIOLATION;
             goto out;
         }
