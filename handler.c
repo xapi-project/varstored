@@ -626,7 +626,9 @@ check_signature_list_format(uint8_t *name, UINTN name_len,
 
             cert_data = (EFI_SIGNATURE_DATA *)((uint8_t *)sig_list +
                 sizeof(EFI_SIGNATURE_LIST) + sig_list->SignatureHeaderSize);
-            cert_len = sig_list->SignatureSize - GUID_LEN;
+            if (sig_list->SignatureSize < EFI_SIG_DATA_SIZE)
+                return EFI_INVALID_PARAMETER;
+            cert_len = sig_list->SignatureSize - EFI_SIG_DATA_SIZE;
             cert = X509_from_buf(cert_data->SignatureData, cert_len);
             if (!cert)
                 return EFI_INVALID_PARAMETER;
@@ -809,8 +811,12 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
                           cert_list->SignatureHeaderSize) / cert_list->SignatureSize;
 
                 for (i = 0; i < count; i++) {
+                    if (cert_list->SignatureSize < EFI_SIG_DATA_SIZE) {
+                        status = EFI_SECURITY_VIOLATION;
+                        goto out;
+                    }
                     trusted_cert = X509_from_buf(cert->SignatureData,
-                        cert_list->SignatureSize - (sizeof(EFI_SIGNATURE_DATA) - 1));
+                        cert_list->SignatureSize - EFI_SIG_DATA_SIZE);
                     if (trusted_cert) {
                         status = pkcs7_verify(sig, sig_len, trusted_cert,
                                               verify_buf, verify_len);
@@ -842,8 +848,16 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
         cert_list = (EFI_SIGNATURE_LIST *)payload;
         cert = (EFI_SIGNATURE_DATA *)((uint8_t *)cert_list +
                sizeof(EFI_SIGNATURE_LIST) + cert_list->SignatureHeaderSize);
+        if (cert_list->SignatureSize < EFI_SIG_DATA_SIZE) {
+            status = EFI_SECURITY_VIOLATION;
+            goto out;
+        }
         trusted_cert = X509_from_buf(cert->SignatureData,
-                                     cert_list->SignatureSize - (sizeof(EFI_SIGNATURE_DATA) - 1));
+                                     cert_list->SignatureSize - EFI_SIG_DATA_SIZE);
+        if (!trusted_cert) {
+            status = EFI_SECURITY_VIOLATION;
+            goto out;
+        }
 
         status = pkcs7_verify(sig, sig_len, trusted_cert,
                               verify_buf, verify_len);

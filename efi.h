@@ -137,6 +137,8 @@ typedef struct __attribute__((packed)) {
     uint8_t SignatureData[1];
 } EFI_SIGNATURE_DATA;
 
+#define EFI_SIG_DATA_SIZE (offsetof(EFI_SIGNATURE_DATA, SignatureData))
+
 typedef struct __attribute__((packed)) {
     EFI_GUID SignatureType;
     UINT32 SignatureListSize;
