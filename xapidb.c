@@ -172,7 +172,7 @@ unserialize_variables(uint8_t *buf, size_t count)
     return true;
 }
 
-static bool
+static enum backend_init_status
 xapidb_init(void)
 {
     FILE *f;
@@ -184,18 +184,18 @@ xapidb_init(void)
     int max_len, n, total = 0;
 
     if (!arg_init)
-        return true;
+        return BACKEND_INIT_FIRSTBOOT;
 
     f = fopen(arg_init, "r");
     if (!f) {
         DBG("Failed to open '%s'\n", arg_init);
-        return false;
+        return BACKEND_INIT_FAILURE;
     }
 
     if (fstat(fileno(f), &st) == -1 || st.st_size > MAX_FILE_SIZE) {
         DBG("Init file size is invalid\n");
         fclose(f);
-        return false;
+        return BACKEND_INIT_FAILURE;
     }
     max_len = st.st_size * 3 / 4;
 
@@ -203,7 +203,7 @@ xapidb_init(void)
     if (!buf) {
         DBG("Failed to allocate memory\n");
         fclose(f);
-        return false;
+        return BACKEND_INIT_FAILURE;
     }
 
     bio = BIO_new_fp(f, BIO_CLOSE);
@@ -211,13 +211,13 @@ xapidb_init(void)
         DBG("Failed to create BIO\n");
         free(buf);
         fclose(f);
-        return false;
+        return BACKEND_INIT_FAILURE;
     }
     b64 = BIO_new(BIO_f_base64());
     if (!b64) {
         DBG("Failed to create BIO\n");
         BIO_free_all(bio);
-        return false;
+        return BACKEND_INIT_FAILURE;
     }
     BIO_push(b64, bio);
     BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
@@ -235,14 +235,14 @@ xapidb_init(void)
     if (total < DB_HEADER_LEN) {
         DBG("Init file size is invalid\n");
         free(buf);
-        return false;
+        return BACKEND_INIT_FAILURE;
     }
 
     ptr = buf;
     if (memcmp(ptr, DB_MAGIC, strlen(DB_MAGIC))) {
         DBG("Invalid init magic\n");
         free(buf);
-        return false;
+        return BACKEND_INIT_FAILURE;
     }
     ptr += strlen(DB_MAGIC);
 
@@ -250,7 +250,7 @@ xapidb_init(void)
     if (version != DB_VERSION) {
         DBG("Unsupported init version\n");
         free(buf);
-        return false;
+        return BACKEND_INIT_FAILURE;
     }
 
     count = unserialize_uintn(&ptr);
@@ -259,7 +259,7 @@ xapidb_init(void)
     unserialize_variables(ptr, count);
     free(buf);
 
-    return true;
+    return BACKEND_INIT_SUCCESS;
 }
 
 static bool

@@ -3,3 +3,7 @@
 varstored
 test
 test.dat
+create-auth
+*.auth
+*.key
+PK.pem

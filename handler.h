@@ -9,6 +9,8 @@
 #define DATA_LIMIT 57344 /* Maximum length of a single variable */
 #define TOTAL_LIMIT 65536 /* Maximum total storage */
 
+#define SHMEM_SIZE (16 * 4096)
+
 enum command_t {
     COMMAND_GET_VARIABLE,
     COMMAND_SET_VARIABLE,
@@ -33,6 +35,7 @@ extern struct efi_variable *var_list;
 void dispatch_command(uint8_t *comm_buf);
 void load_list();
 bool setup_variables(void);
+bool setup_keys(void);
 
 extern bool secure_boot_enable;
 

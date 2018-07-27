@@ -64,7 +64,7 @@ device_io_writel(void *priv, uint64_t offset, uint32_t val)
 
     shmem = xc_map_foreign_range(state->xch,
                                  state->domid,
-                                 XC_PAGE_SIZE,
+                                 SHMEM_SIZE,
                                  PROT_READ | PROT_WRITE,
                                  val);
     if (!shmem) {

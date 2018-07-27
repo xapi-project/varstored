@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <errno.h>
+#include <sys/stat.h>
 
 #include <openssl/objects.h>
 #include <openssl/rsa.h>
@@ -61,6 +62,8 @@ uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
  * stored.
  */
 #define VARIABLE_SIZE_MIN 64
+
+#define AUTH_PATH_PREFIX "/usr/share/varstored"
 
 struct efi_variable *var_list;
 bool secure_boot_enable;
@@ -1634,4 +1637,83 @@ setup_variables(void)
         return false;
 
     return true;
+}
+
+static bool
+set_variable_from_auth(uint8_t *name, UINTN name_len, char *guid, char *path)
+{
+    uint8_t buf[SHMEM_SIZE];
+    uint8_t *ptr, *data;
+    struct stat st;
+    FILE *f;
+
+    f = fopen(path, "r");
+    if (!f) {
+        DBG("Failed to open '%s'\n", path);
+        return false;
+    }
+
+    if (fstat(fileno(f), &st) == -1) {
+        DBG("Failed to stat '%s'\n", path);
+        fclose(f);
+    }
+
+    data = malloc(st.st_size);
+    if (!data) {
+        DBG("Out of memory!\n");
+        fclose(f);
+        return false;
+    }
+    if (fread(data, 1, st.st_size, f) != st.st_size) {
+        DBG("Failed to read '%s'\n", path);
+        fclose(f);
+        return false;
+    }
+    fclose(f);
+
+    ptr = buf;
+    serialize_uint32(&ptr, 1); /* version */
+    serialize_uint32(&ptr, COMMAND_SET_VARIABLE);
+    serialize_data(&ptr, name, name_len);
+    serialize_guid(&ptr, guid);
+    serialize_data(&ptr, data, st.st_size);
+    free(data);
+    serialize_uint32(&ptr, ATTR_BRNV | EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS);
+    *ptr = 0; /* at_runtime */
+    dispatch_command(buf);
+
+    ptr = buf;
+    if (unserialize_uintn(&ptr) == EFI_SUCCESS) {
+        return true;
+    } else {
+        DBG("Failed to execute '%s'\n", path);
+        return false;
+    }
+}
+
+bool
+setup_keys(void)
+{
+    bool ret;
+
+    ret = set_variable_from_auth(EFI_PLATFORM_KEY_NAME,
+                                 sizeof(EFI_PLATFORM_KEY_NAME),
+                                 gEfiGlobalVariableGuid,
+                                 AUTH_PATH_PREFIX "/PK.auth");
+    if (!ret)
+        return false;
+
+    ret = set_variable_from_auth(EFI_KEY_EXCHANGE_KEY_NAME,
+                                 sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
+                                 gEfiGlobalVariableGuid,
+                                 AUTH_PATH_PREFIX "/KEK.auth");
+    if (!ret)
+        return false;
+
+    ret = set_variable_from_auth(EFI_IMAGE_SECURITY_DATABASE,
+                                 sizeof(EFI_IMAGE_SECURITY_DATABASE),
+                                 gEfiImageSecurityDatabaseGuid,
+                                 AUTH_PATH_PREFIX "/db.auth");
+
+    return ret;
 }

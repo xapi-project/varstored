@@ -3,13 +3,19 @@
 
 #include <stdbool.h>
 
+enum backend_init_status {
+    BACKEND_INIT_FAILURE,
+    BACKEND_INIT_SUCCESS,
+    BACKEND_INIT_FIRSTBOOT,
+};
+
 struct backend {
     /* Called to handle arguments specific to the backend. */
     bool (*parse_arg)(const char *name, const char *val);
     /* Called after argument parsing to verify arguments. */
     bool (*check_args)(void);
     /* Called at startup when not resuming to load the initial data. */
-    bool (*init)(void);
+    enum backend_init_status (*init)(void);
     /* Called to save state when exiting. */
     bool (*save)(void);
     /* Called to resume from previously saved state. */

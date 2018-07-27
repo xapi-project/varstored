@@ -851,8 +851,18 @@ main(int argc, char **argv, char **envp)
         if (!db->resume())
             exit(1);
     } else {
-        if (!db->init())
+        enum backend_init_status status = db->init();
+
+        if (status == BACKEND_INIT_FAILURE)
             exit(1);
+
+        if (!setup_variables())
+            exit(1);
+
+        if (status == BACKEND_INIT_FIRSTBOOT) {
+            if (!setup_keys())
+                exit(1);
+        }
     }
 
     sigfillset(&block);

@@ -45,6 +45,26 @@ check: PK.crt PK2.crt
 
 .PHONY: check
 
+AUTHS = PK.auth KEK.auth db.auth
+auth: $(AUTHS)
+
+.PHONY: auth
+
+create-auth: create-auth.c
+	gcc -Wall -o create-auth create-auth.c -lcrypto
+
+%.pem %.key:
+	openssl req -new -x509 -newkey rsa:2048 -subj "/CN=$*/" -keyout $*.key -out $*.pem -days 36500 -nodes -sha256
+
+PK.auth: create-auth PK.pem PK.key
+	./create-auth -k PK.key -c PK.pem PK PK.auth PK.pem
+
+KEK.auth: create-auth PK.pem PK.key KEK.list
+	./create-auth -k PK.key -c PK.pem KEK KEK.auth $$(cat KEK.list)
+
+db.auth: create-auth PK.pem PK.key db.list
+	./create-auth -k PK.key -c PK.pem db db.auth $$(cat db.list)
+
 clean:
 	$(foreach dir,$(SUBDIRS),make -C $(dir) clean)
 	rm -f $(OBJS)
@@ -52,6 +72,9 @@ clean:
 	rm -f $(TARGET)
 	rm -f TAGS
 	rm -f test test.dat
+	rm -f $(AUTHS)
+	rm -f create-auth
+	rm -f PK.pem PK.key
 
 .PHONY: TAGS
 TAGS:
