@@ -80,6 +80,7 @@ typedef unsigned short CHAR16;
 ///
 #define EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS   0x00000020
 #define EFI_VARIABLE_APPEND_WRITE                            0x00000040
+#define EFI_VARIABLE_ENHANCED_AUTHENTICATED_ACCESS           0x00000080
 ///
 /// NOTE: EFI_VARIABLE_AUTHENTICATED_WRITE_ACCESS is deprecated and should be considered reserved.
 ///
@@ -88,9 +89,11 @@ typedef unsigned short CHAR16;
 /* Abbrieviations */
 #define ATTR_B (EFI_VARIABLE_BOOTSERVICE_ACCESS)
 #define ATTR_R (EFI_VARIABLE_RUNTIME_ACCESS)
-#define ATTR_BR (EFI_VARIABLE_BOOTSERVICE_ACCESS|EFI_VARIABLE_RUNTIME_ACCESS)
-#define ATTR_BNV (EFI_VARIABLE_BOOTSERVICE_ACCESS|EFI_VARIABLE_NON_VOLATILE)
-#define ATTR_BRNV (EFI_VARIABLE_BOOTSERVICE_ACCESS|EFI_VARIABLE_RUNTIME_ACCESS|EFI_VARIABLE_NON_VOLATILE)
+#define ATTR_BR (EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS)
+#define ATTR_BNV (EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_NON_VOLATILE)
+#define ATTR_BRNV (EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS | EFI_VARIABLE_NON_VOLATILE)
+#define ATTR_B_TIME (ATTR_B | EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS)
+#define ATTR_BRNV_TIME (ATTR_BRNV | EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS)
 
 typedef struct __attribute__((packed)) {
     UINT16 Year;
@@ -126,12 +129,16 @@ typedef struct __attribute__((packed)) {
 #define WIN_CERT_TYPE_EFI_GUID         0x0EF1
 
 typedef struct __attribute__((packed)) {
-    char SignatureOwner[GUID_LEN];
+    char data[GUID_LEN];
+} EFI_GUID;
+
+typedef struct __attribute__((packed)) {
+    EFI_GUID SignatureOwner;
     uint8_t SignatureData[1];
 } EFI_SIGNATURE_DATA;
 
 typedef struct __attribute__((packed)) {
-    char SignatureType[GUID_LEN];
+    EFI_GUID SignatureType;
     UINT32 SignatureListSize;
     UINT32 SignatureHeaderSize;
     UINT32 SignatureSize;

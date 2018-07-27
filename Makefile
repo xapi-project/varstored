@@ -36,8 +36,8 @@ $(TARGET): $(LIBS) $(OBJS)
 %.o: %.c
 	gcc -o $@ $(CFLAGS) -c $<
 
-check:
-	gcc -Wall -o test test.c $$(pkg-config --cflags --libs glib-2.0) -lcrypto
+check: PK.crt PK2.crt
+	gcc -Wall -g -o test test.c $$(pkg-config --cflags --libs glib-2.0) -lcrypto
 	./test
 
 .PHONY: check
@@ -58,3 +58,7 @@ TAGS:
 
 print-%:
 	echo $($*)
+
+%.crt:
+	openssl req -new -x509 -newkey rsa:2048 -subj "/CN=$*/" -keyout $*.key -out $@ -days 365 -nodes -sha256
+

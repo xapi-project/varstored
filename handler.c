@@ -809,7 +809,7 @@ check_signature_list_format(uint8_t *name, UINTN name_len,
 
     while ((remaining > 0) && (remaining >= sig_list->SignatureListSize)) {
         for (i = 0; i < (sizeof(mSupportSigItem) / sizeof(EFI_SIGNATURE_ITEM)); i++ ) {
-            if (!memcmp(sig_list->SignatureType, mSupportSigItem[i].SigType,
+            if (!memcmp(&sig_list->SignatureType, mSupportSigItem[i].SigType,
                         GUID_LEN)) {
                 if (mSupportSigItem[i].SigDataSize != (UINT32)~0 &&
                         (sig_list->SignatureSize - GUID_LEN) != mSupportSigItem[i].SigDataSize)
@@ -824,7 +824,7 @@ check_signature_list_format(uint8_t *name, UINTN name_len,
         if (i == (sizeof (mSupportSigItem) / sizeof (EFI_SIGNATURE_ITEM)))
             return EFI_INVALID_PARAMETER;
 
-        if (!memcmp(sig_list->SignatureType, gEfiCertX509Guid, GUID_LEN)) {
+        if (!memcmp(&sig_list->SignatureType, gEfiCertX509Guid, GUID_LEN)) {
             EFI_SIGNATURE_DATA *cert_data;
             UINTN cert_len;
             X509 *cert;
@@ -1332,7 +1332,7 @@ filter_signature_list(uint8_t *data, UINTN data_len,
             old_rem = data_len;
             old_cert_list = (EFI_SIGNATURE_LIST *)data;
             while ((old_rem > 0) && (old_rem >= old_cert_list->SignatureListSize)) {
-                if (!memcmp(old_cert_list->SignatureType, new_cert_list->SignatureType, GUID_LEN) &&
+                if (!memcmp(&old_cert_list->SignatureType, &new_cert_list->SignatureType, GUID_LEN) &&
                         (old_cert_list->SignatureSize == new_cert_list->SignatureSize)) {
                     old_cert = (EFI_SIGNATURE_DATA *)((uint8_t *)old_cert_list +
                                sizeof(EFI_SIGNATURE_LIST) + old_cert_list->SignatureHeaderSize);
