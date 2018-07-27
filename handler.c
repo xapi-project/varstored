@@ -988,7 +988,7 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
         status = verify_auth_var_type(name, name_len,
                                       data, data_len,
                                       guid, attr, append,
-                                      cur, setup_mode == 1 ? AUTH_TYPE_NONE : AUTH_TYPE_KEK,
+                                      cur, setup_mode == 1 ? AUTH_TYPE_NONE : AUTH_TYPE_PK,
                                       payload_out, payload_len_out,
                                       digest, timestamp);
         if (status == EFI_SUCCESS)
