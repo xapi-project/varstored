@@ -7,3 +7,5 @@ create-auth
 *.auth
 *.key
 PK.pem
+testPK.pem
+testPK2.pem

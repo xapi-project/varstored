@@ -9,7 +9,7 @@
 #include <openssl/pem.h>
 #include <assert.h>
 
-char *save_name = "test.dat";
+static char *save_name = "test.dat";
 
 /* The communication buffer. */
 static uint8_t buf[16 * 4096];
@@ -148,6 +148,79 @@ static void free_dstring(dstring *d)
  * Helper functions
  */
 
+static enum backend_init_status testdb_init(void)
+{
+    struct efi_variable *l;
+    FILE *f = fopen(save_name, "r");
+
+    if (!f) {
+        fprintf(stderr, "failed to open %s : %s\n", save_name, strerror(errno));
+        abort();
+    }
+
+    for (;;) {
+        UINTN name_len;
+
+        if (fread(&name_len, sizeof name_len, 1, f) != 1)
+            break;
+
+        l = malloc(sizeof *l);
+        if (!l)
+            abort();
+
+        l->name_len = name_len;
+        l->name = malloc(l->name_len);
+        fread(l->name, 1, l->name_len, f);
+        fread(&l->data_len, sizeof l->data_len, 1, f);
+        l->data = malloc(l->data_len);
+        fread(l->data, 1, l->data_len, f);
+        fread(l->guid, 1, GUID_LEN, f);
+        fread(&l->attributes, 1, sizeof l->attributes, f);
+        l->next = var_list;
+        var_list = l;
+    }
+
+    fclose(f);
+    return BACKEND_INIT_SUCCESS;
+}
+
+static bool testdb_save(void)
+{
+    struct efi_variable *l;
+    FILE *f = fopen(save_name, "w");
+
+    if (!f) {
+        fprintf(stderr, "failed to open %s %s\n", save_name, strerror(errno));
+        abort();
+    }
+
+    l = var_list;
+    while (l) {
+        if (l->attributes & EFI_VARIABLE_NON_VOLATILE) {
+            fwrite(&l->name_len, sizeof l->name_len, 1, f);
+            fwrite(l->name, 1, l->name_len, f);
+            fwrite(&l->data_len, sizeof l->data_len, 1, f);
+            fwrite(l->data, 1, l->data_len, f);
+            fwrite(l->guid, 1, GUID_LEN, f);
+            fwrite(&l->attributes, sizeof l->attributes, 1, f);
+        }
+        l = l->next;
+    }
+
+    fclose(f);
+    return true;
+}
+
+struct backend testdb = {
+    .parse_arg = NULL,
+    .check_args = NULL,
+    .init = testdb_init,
+    .save = NULL,
+    .resume = NULL,
+    .set_variable = testdb_save,
+};
+struct backend *db = &testdb;
+
 static void setup_globals(void)
 {
     tname1 = alloc_dstring("foo");
@@ -160,6 +233,8 @@ static void setup_globals(void)
     setupMode_name = alloc_dstring("SetupMode");
     secureBoot_name = alloc_dstring("SecureBoot");
     PK_name = alloc_dstring("PK");
+
+    secure_boot_enable = true;
 }
 
 static void reset_vars(void)
@@ -294,10 +369,10 @@ struct sign_details
     char *digest;
 };
 
-struct sign_details sign_first_key = {"PK.crt", "PK.key", "SHA256"};
-struct sign_details sign_bad_digest = {"PK.crt", "PK.key", "SHA224"};
-struct sign_details sign_second_key = {"PK2.crt", "PK2.key", "SHA256"};
-struct sign_details sign_mixed_keys = {"PK.crt", "PK2.key", "SHA256"};
+struct sign_details sign_first_key = {"testPK.pem", "testPK.key", "SHA256"};
+struct sign_details sign_bad_digest = {"testPK.pem", "testPK.key", "SHA224"};
+struct sign_details sign_second_key = {"testPK2.pem", "testPK2.key", "SHA256"};
+struct sign_details sign_mixed_keys = {"testPK.pem", "testPK2.key", "SHA256"};
 
 static void setup_ssl(void)
 {
@@ -1346,7 +1421,7 @@ static void test_set_variable_non_volatile(void)
     sv_ok(tname4, tguid4, tdata4, sizeof(tdata4), ATTR_BR);
 
     reset_vars();
-    load_list();
+    db->init();
 
     call_get_variable(tname1, tguid1, BSIZ, 0);
     ptr = buf;
@@ -1384,7 +1459,7 @@ static void test_set_variable_non_volatile(void)
     sv_ok(tname1, tguid1, tdata2, sizeof(tdata2), ATTR_BNV);
 
     reset_vars();
-    load_list();
+    db->init();
 
     call_get_variable(tname1, tguid1, BSIZ, 0);
     ptr = buf;
@@ -1405,7 +1480,7 @@ static void test_set_variable_non_volatile(void)
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
 
     reset_vars();
-    load_list();
+    db->init();
 
     call_get_variable(tname3, tguid3, BSIZ, 0);
     ptr = buf;
@@ -1426,7 +1501,7 @@ static void test_set_variable_non_volatile(void)
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
 
     reset_vars();
-    load_list();
+    db->init();
 
     call_get_variable(tname3, tguid3, BSIZ, 0);
     ptr = buf;
@@ -1559,7 +1634,7 @@ static void test_secure_set_variable_usermode()
                         (uint8_t *)"\1", 1);
 
     /* Move into user mode by enrolling Platform Key. */
-    read_x509_into_CertList("PK.crt", &ret_cert, &certlen);
+    read_x509_into_CertList("testPK.pem", &ret_cert, &certlen);
 
     sign_and_check(PK_name, gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                    &test_timea, (uint8_t *)ret_cert, certlen,
@@ -1586,7 +1661,7 @@ static void test_secure_set_PK()
     check_variable_data(secureBoot_name, gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
 
-    read_x509_into_CertList("PK.crt", &ret_cert, &certlen);
+    read_x509_into_CertList("testPK.pem", &ret_cert, &certlen);
 
     /* try cert, signed by someone unknown. Should be no mode change. */
     sign_and_check(PK_name, gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
@@ -1635,9 +1710,9 @@ static void test_secure_set_PK()
     check_variable_data(setupMode_name, gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
     check_variable_data(secureBoot_name, gEfiGlobalVariableGuid, BSIZ, 0,
-                        (uint8_t *)"\0", 1);
+                        (uint8_t *)"\1", 1);
 
-    read_x509_into_CertList("PK.crt", &second_cert, &secondcertlen);
+    read_x509_into_CertList("testPK.pem", &second_cert, &secondcertlen);
 
     /* new cert, signed by self */
     sign_and_check(PK_name, gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
@@ -1646,7 +1721,7 @@ static void test_secure_set_PK()
     check_variable_data(setupMode_name, gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
     check_variable_data(secureBoot_name, gEfiGlobalVariableGuid, BSIZ, 0,
-                        (uint8_t *)"\0", 1);
+                        (uint8_t *)"\1", 1);
 
     /* new cert, truncated */
     sign_and_check(PK_name, gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
@@ -1655,7 +1730,7 @@ static void test_secure_set_PK()
     check_variable_data(setupMode_name, gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
     check_variable_data(secureBoot_name, gEfiGlobalVariableGuid, BSIZ, 0,
-                        (uint8_t *)"\0", 1);
+                        (uint8_t *)"\1", 1);
 
     /* new cert, signed by previous */
     sign_and_check(PK_name, gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
@@ -1664,7 +1739,7 @@ static void test_secure_set_PK()
     check_variable_data(setupMode_name, gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
     check_variable_data(secureBoot_name, gEfiGlobalVariableGuid, BSIZ, 0,
-                        (uint8_t *)"\0", 1);
+                        (uint8_t *)"\1", 1);
 
     /* delete it.... */
     sign_and_check(PK_name, gEfiGlobalVariableGuid, ATTR_BRNV_TIME,

@@ -39,7 +39,7 @@ $(TARGET): $(LIBS) $(OBJS)
 %.o: %.c
 	gcc -o $@ $(CFLAGS) -c $<
 
-check: PK.crt PK2.crt
+check: testPK.pem testPK.key testPK2.pem testPK2.key
 	gcc -Wall -g -o test test.c $$(pkg-config --cflags --libs glib-2.0) -lcrypto
 	./test
 
@@ -71,7 +71,7 @@ clean:
 	rm -f $(DEPS)
 	rm -f $(TARGET)
 	rm -f TAGS
-	rm -f test test.dat
+	rm -f test test.dat testPK.pem testPK.key testPK2.pem testPK2.key
 	rm -f $(AUTHS)
 	rm -f create-auth
 	rm -f PK.pem PK.key
@@ -84,7 +84,3 @@ TAGS:
 
 print-%:
 	echo $($*)
-
-%.crt:
-	openssl req -new -x509 -newkey rsa:2048 -subj "/CN=$*/" -keyout $*.key -out $@ -days 365 -nodes -sha256
-
