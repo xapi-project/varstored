@@ -1050,15 +1050,10 @@ static void test_set_variable_attr(void)
      * EFI_VARIABLE_ENHANCED_AUTHENTICATED_ACCESS attribute are set in a
      * SetVariable() call, then the firmware must return EFI_INVALID_PARAMETER.
      */
-
-    /*
-     *  TODO: This fails, and should be fixed
-     *
-     * sign_and_check(tname2, tguid1,
-     *                ATTR_B_TIME | EFI_VARIABLE_ENHANCED_AUTHENTICATED_ACCESS,
-     *                &test_timea, tdata1, sizeof(tdata1), &sign_first_key,
-     *                EFI_INVALID_PARAMETER);
-     */
+     sign_and_check(tname2, tguid1,
+                    ATTR_B_TIME | EFI_VARIABLE_ENHANCED_AUTHENTICATED_ACCESS,
+                    &test_timea, tdata1, sizeof(tdata1), &sign_first_key,
+                    EFI_INVALID_PARAMETER);
 }
 
 static void test_set_variable_set(void)

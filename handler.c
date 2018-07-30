@@ -1246,6 +1246,12 @@ do_set_variable(uint8_t *comm_buf)
         goto err;
     }
 
+    if ((attr & EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS) &&
+            (attr & EFI_VARIABLE_ENHANCED_AUTHENTICATED_ACCESS)) {
+        serialize_result(&ptr, EFI_INVALID_PARAMETER);
+        goto err;
+    }
+
     /* If runtime access is set, bootservice access must also be set. */
     if ((attr & (EFI_VARIABLE_RUNTIME_ACCESS |
                EFI_VARIABLE_BOOTSERVICE_ACCESS)) == EFI_VARIABLE_RUNTIME_ACCESS) {
