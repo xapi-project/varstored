@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
@@ -39,6 +40,8 @@
 #include "option.h"
 
 #define mb() asm volatile ("" : : : "memory")
+
+#define XS_VARSTORED_PID_PATH "/local/domain/%u/varstored-pid"
 
 enum {
     VARSTORED_OPT_DOMAIN,
@@ -109,6 +112,7 @@ typedef enum {
     VARSTORED_SEQ_PORTS_BOUND,
     VARSTORED_SEQ_BUF_PORT_BOUND,
     VARSTORED_SEQ_DEVICE_INITIALIZED,
+    VARSTORED_SEQ_WROTE_PID,
     VARSTORED_SEQ_INITIALIZED,
     VARSTORED_NR_SEQS
 } varstored_seq_t;
@@ -128,6 +132,40 @@ typedef struct varstored_state {
 } varstored_state_t;
 
 static varstored_state_t varstored_state;
+
+static void
+initialize_secure_boot(struct xs_handle *xsh, domid_t domid)
+{
+    char path[64];
+    char *s;
+
+    snprintf(path, sizeof(path), "/local/domain/%u/platform/secureboot", domid);
+    s = xs_read(xsh, XBT_NULL, path, NULL);
+    secure_boot_enable = s && !strcmp(s, "true");
+    if (secure_boot_enable)
+        DBG("SECURE_BOOT_ON\n");
+    else
+        DBG("SECURE_BOOT_OFF\n");
+    free(s);
+}
+
+static bool
+xs_write_pid(struct xs_handle *xsh, domid_t domid)
+{
+    char *varstore_pid = NULL;
+    char *key = NULL;
+    bool ret = false;
+    pid_t pid = getpid();
+
+    /* pid needs to be written to /local/domain/<domid>/varstored-pid */
+    if (asprintf(&varstore_pid, "%u", pid) != -1)
+        if (asprintf(&key, XS_VARSTORED_PID_PATH, varstored_state.domid) != -1)
+            ret = xs_write(xsh, 0, key, varstore_pid, strlen(varstore_pid));
+
+    free(key);
+    free(varstore_pid);
+    return ret;
+}
 
 static void
 handle_pio(ioreq_t *ioreq)
@@ -273,6 +311,10 @@ varstored_seq_next(void)
         DBG(">DEVICE_INITIALIZED\n");
         break;
 
+    case VARSTORED_SEQ_WROTE_PID:
+        DBG(">WROTE_PID\n");
+        break;
+
     case VARSTORED_SEQ_INITIALIZED:
         DBG(">INITIALIZED\n");
         break;
@@ -288,6 +330,28 @@ varstored_teardown(void)
 {
     if (varstored_state.seq == VARSTORED_SEQ_INITIALIZED) {
         DBG("<INITIALIZED\n");
+
+        varstored_state.seq = VARSTORED_SEQ_WROTE_PID;
+    }
+
+    if (varstored_state.seq >= VARSTORED_SEQ_WROTE_PID) {
+        char *key;
+        struct xs_handle *xsh;
+
+        DBG("<WROTE_PID\n");
+
+        xsh = xs_open(0);
+        if (xsh) {
+            if (asprintf(&key, XS_VARSTORED_PID_PATH, varstored_state.domid) != -1) {
+                xs_rm(xsh, 0, key);
+                free(key);
+            } else {
+                DBG("Couldn't remove varstore pid from xenstore\n");
+            }
+            xs_close(xsh);
+        } else {
+            fprintf(stderr, "Couldn't open xenstore");
+        }
 
         varstored_state.seq = VARSTORED_SEQ_DEVICE_INITIALIZED;
     }
@@ -427,6 +491,7 @@ varstored_initialize(domid_t domid, unsigned int device, unsigned int function)
     unsigned long buf_pfn;
     evtchn_port_t port;
     evtchn_port_t buf_port;
+    struct xs_handle *xsh;
 
     varstored_state.domid = domid;
 
@@ -471,7 +536,7 @@ varstored_initialize(domid_t domid, unsigned int device, unsigned int function)
                                     &varstored_state.ioservid);
     if (rc < 0)
         goto fail3;
-    
+
     varstored_seq_next();
 
     rc = xc_hvm_get_ioreq_server_info(varstored_state.xch, varstored_state.domid,
@@ -553,10 +618,47 @@ varstored_initialize(domid_t domid, unsigned int device, unsigned int function)
 
     varstored_seq_next();
 
+    xsh = xs_open(0);
+    if (xsh == NULL) {
+        fprintf(stderr, "Couldn't open xenstore");
+        goto fail12;
+    }
+
+    initialize_secure_boot(xsh, varstored_state.domid);
+
+    if (opt_resume) {
+        if (!db->resume())
+            goto fail13;
+    } else {
+        enum backend_init_status status = db->init();
+
+        if (status == BACKEND_INIT_FAILURE)
+            goto fail13;
+
+        if (!setup_variables())
+            goto fail13;
+
+        if (status == BACKEND_INIT_FIRSTBOOT) {
+            if (!setup_keys())
+                goto fail13;
+        }
+    }
+
+    if (!xs_write_pid(xsh, varstored_state.domid))
+        goto fail13;
+
+    xs_close(xsh);
+
+    varstored_seq_next();
+
     varstored_seq_next();
 
     assert(varstored_state.seq == VARSTORED_SEQ_INITIALIZED);
     return 0;
+
+fail13:
+    xs_close(xsh);
+    DBG("fail13\n");
 
 fail12:
     DBG("fail12\n");
@@ -705,30 +807,6 @@ varstored_poll_iopages(void)
     }
 }
 
-static void initialize_secure_boot(domid_t domid)
-{
-    char path[64];
-    struct xs_handle *handle = xs_open(0);
-    char *s;
-
-    snprintf(path, sizeof(path), "/local/domain/%u/platform/secureboot", domid);
-    if (!handle)
-    {
-        fprintf(stderr, "Could not open connection to xenstored: %d, %s\n", errno, strerror(errno));
-        exit(1);
-    }
-    s = xs_read(handle, XBT_NULL, path, NULL);
-
-    secure_boot_enable = s && !strcmp(s, "true");
-
-    if (secure_boot_enable)
-        DBG("SECURE_BOOT_ON\n");
-    else
-        DBG("SECURE_BOOT_OFF\n");
-    xs_close(handle);
-    free(s);
-}
-
 int
 main(int argc, char **argv, char **envp)
 {
@@ -843,26 +921,6 @@ main(int argc, char **argv, char **envp)
         }
     } else {
         function = 0;
-    }
-
-    initialize_secure_boot(domid);
-
-    if (opt_resume) {
-        if (!db->resume())
-            exit(1);
-    } else {
-        enum backend_init_status status = db->init();
-
-        if (status == BACKEND_INIT_FAILURE)
-            exit(1);
-
-        if (!setup_variables())
-            exit(1);
-
-        if (status == BACKEND_INIT_FIRSTBOOT) {
-            if (!setup_keys())
-                exit(1);
-        }
     }
 
     sigfillset(&block);
