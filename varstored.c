@@ -134,8 +134,11 @@ typedef struct varstored_state {
 
 static varstored_state_t varstored_state;
 
+/*
+ * Initialize various settings from xenstore.
+ */
 static void
-initialize_secure_boot(struct xs_handle *xsh, domid_t domid)
+initialize_settings(struct xs_handle *xsh, domid_t domid)
 {
     char path[64];
     char *s;
@@ -148,6 +151,16 @@ initialize_secure_boot(struct xs_handle *xsh, domid_t domid)
     else
         DBG("SECURE_BOOT_OFF\n");
     free(s);
+
+    snprintf(path, sizeof(path),
+             "/local/domain/%u/platform/auth-enforce", domid);
+    s = xs_read(xsh, XBT_NULL, path, NULL);
+
+    auth_enforce = !s || strcmp(s, "false");
+    free(s);
+
+    DBG("Authenticated variables: %s\n",
+        auth_enforce ? "enforcing" : "permissive");
 }
 
 static bool
@@ -625,7 +638,7 @@ varstored_initialize(domid_t domid, unsigned int device, unsigned int function)
         goto fail12;
     }
 
-    initialize_secure_boot(xsh, varstored_state.domid);
+    initialize_settings(xsh, varstored_state.domid);
 
     if (opt_resume) {
         if (!db->resume())

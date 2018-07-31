@@ -64,6 +64,7 @@ uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
 
 struct efi_variable *var_list;
 bool secure_boot_enable;
+bool auth_enforce = true;
 
 static uint64_t
 get_space_usage(void)
@@ -703,7 +704,7 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
             (timestamp->Pad2 != 0))
         return EFI_SECURITY_VIOLATION;
 
-    if (auth_type != AUTH_TYPE_NONE && !append && cur &&
+    if (auth_enforce && auth_type != AUTH_TYPE_NONE && !append && cur &&
             !time_later(&cur->timestamp, timestamp))
         return EFI_SECURITY_VIOLATION;
 
@@ -878,7 +879,14 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
         if (status != EFI_SUCCESS)
             goto out;
 
-        if (cur && memcmp(digest, cur->cert, SHA256_DIGEST_SIZE)) {
+        /*
+         * For private authenticated variables, permissive mode means that the
+         * certificate used to sign the data does not need to match the
+         * previous one. However, it still needs to exist and sign the data
+         * correctly since it is used for verifying subsequent updates.
+         */
+        if (auth_enforce && cur &&
+                memcmp(digest, cur->cert, SHA256_DIGEST_SIZE)) {
             status = EFI_SECURITY_VIOLATION;
             goto out;
         }
@@ -938,20 +946,19 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
     if (name_len == sizeof(EFI_PLATFORM_KEY_NAME) &&
             !memcmp(name, EFI_PLATFORM_KEY_NAME, name_len) &&
             !memcmp(guid, &gEfiGlobalVariableGuid, GUID_LEN)) {
-        if (setup_mode == 1)
-            status = verify_auth_var_type(name, name_len,
-                                          data, data_len,
-                                          guid, attr, append,
-                                          cur, AUTH_TYPE_PAYLOAD,
-                                          payload_out, payload_len_out,
-                                          digest, timestamp);
-        else
-            status = verify_auth_var_type(name, name_len,
-                                          data, data_len,
-                                          guid, attr, append,
-                                          cur, AUTH_TYPE_PK,
-                                          payload_out, payload_len_out,
-                                          digest, timestamp);
+        enum auth_type type = AUTH_TYPE_PK;
+
+        if (!auth_enforce)
+            type = AUTH_TYPE_NONE;
+        else if (setup_mode == 1)
+            type = AUTH_TYPE_PAYLOAD;
+
+        status = verify_auth_var_type(name, name_len,
+                                      data, data_len,
+                                      guid, attr, append,
+                                      cur, type,
+                                      payload_out, payload_len_out,
+                                      digest, timestamp);
         if (status != EFI_SUCCESS)
             goto out;
 
@@ -995,12 +1002,17 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
                                            ATTR_BR);
         }
     } else if (name_len == sizeof(EFI_KEY_EXCHANGE_KEY_NAME) &&
-            !memcmp(name, EFI_KEY_EXCHANGE_KEY_NAME, name_len) &&
-            !memcmp(guid, &gEfiGlobalVariableGuid, GUID_LEN)) {
+               !memcmp(name, EFI_KEY_EXCHANGE_KEY_NAME, name_len) &&
+               !memcmp(guid, &gEfiGlobalVariableGuid, GUID_LEN)) {
+        enum auth_type type = AUTH_TYPE_PK;
+
+        if (setup_mode == 1 || !auth_enforce)
+            type = AUTH_TYPE_NONE;
+
         status = verify_auth_var_type(name, name_len,
                                       data, data_len,
                                       guid, attr, append,
-                                      cur, setup_mode == 1 ? AUTH_TYPE_NONE : AUTH_TYPE_PK,
+                                      cur, type,
                                       payload_out, payload_len_out,
                                       digest, timestamp);
         if (status == EFI_SUCCESS)
@@ -1014,7 +1026,7 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
                  !memcmp(name, EFI_IMAGE_SECURITY_DATABASE1, name_len)) ||
                 (name_len == sizeof(EFI_IMAGE_SECURITY_DATABASE2) &&
                  !memcmp(name, EFI_IMAGE_SECURITY_DATABASE2, name_len)))) {
-        if (setup_mode == 1) {
+        if (setup_mode == 1 || !auth_enforce) {
             status = verify_auth_var_type(name, name_len,
                                           data, data_len,
                                           guid, attr, append,
