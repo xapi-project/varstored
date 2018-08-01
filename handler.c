@@ -690,7 +690,7 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
     PKCS7 *pkcs7 = NULL;
     EFI_STATUS status;
 
-    if (data_len < sizeof(*d))
+    if (data_len < offsetof(EFI_VARIABLE_AUTHENTICATION_2, AuthInfo.CertData))
         return EFI_SECURITY_VIOLATION;
 
     d = (EFI_VARIABLE_AUTHENTICATION_2 *)data;
