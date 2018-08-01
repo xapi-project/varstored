@@ -451,7 +451,7 @@ base64_encode(const uint8_t *buf, size_t len, char **out)
       "</params>" \
     "</methodCall>"
 
-#define VM_REMOVE_FROM_PLATFORM_CALL \
+#define VM_REMOVE_FROM_NVRAM_CALL \
     "<?xml version='1.0'?>" \
     "<methodCall>" \
       "<methodName>VM.remove_from_NVRAM</methodName>" \
@@ -462,7 +462,7 @@ base64_encode(const uint8_t *buf, size_t len, char **out)
       "</params>" \
     "</methodCall>"
 
-#define VM_ADD_TO_PLATFORM_CALL \
+#define VM_ADD_TO_NVRAM_CALL \
     "<?xml version='1.0'?>" \
     "<methodCall>" \
       "<methodName>VM.add_to_NVRAM</methodName>" \
@@ -658,7 +658,7 @@ send_to_xapi(char *uuid, char *data)
     free(response);
     response = NULL;
 
-    status = xmlrpc_call(&response, VM_REMOVE_FROM_PLATFORM_CALL, session_ref, vm_ref);
+    status = xmlrpc_call(&response, VM_REMOVE_FROM_NVRAM_CALL, session_ref, vm_ref);
     if (status != HTTP_STATUS_OK)
         goto out;
     if (!xmlrpc_process(response, NULL))
@@ -666,7 +666,7 @@ send_to_xapi(char *uuid, char *data)
     free(response);
     response = NULL;
 
-    status = xmlrpc_call(&response, VM_ADD_TO_PLATFORM_CALL, session_ref, vm_ref, data);
+    status = xmlrpc_call(&response, VM_ADD_TO_NVRAM_CALL, session_ref, vm_ref, data);
     if (status != HTTP_STATUS_OK)
         goto out;
     if (!xmlrpc_process(response, NULL))
