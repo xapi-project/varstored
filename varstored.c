@@ -32,12 +32,13 @@
 #include <xen/hvm/ioreq.h>
 #include <xenstore.h>
 
-#include "debug.h"
+#include <debug.h>
+#include <handler.h>
+#include <backend.h>
+
 #include "device.h"
-#include "pci.h"
-#include "handler.h"
-#include "backend.h"
 #include "option.h"
+#include "pci.h"
 
 #define mb() asm volatile ("" : : : "memory")
 

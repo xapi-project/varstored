@@ -11,8 +11,8 @@
 #include <openssl/pkcs7.h>
 #include <openssl/err.h>
 
-#include "efi.h"
-#include "guid.h"
+#include <efi.h>
+#include <guid.h>
 
 /*
  * This utility prepares an "auth". An auth file contains an authentication

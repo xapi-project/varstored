@@ -26,5 +26,6 @@ struct backend {
 
 extern struct backend *db;
 extern struct backend xapidb;
+extern struct backend xapidb_cmdline;
 
 #endif

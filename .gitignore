@@ -11,3 +11,7 @@ db.auth
 PK.pem
 testPK.pem
 testPK2.pem
+varstore-get
+varstore-ls
+varstore-rm
+varstore-set

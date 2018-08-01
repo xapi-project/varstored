@@ -12,9 +12,10 @@
 
 #include <xenctrl.h>
 
-#include "debug.h"
+#include <debug.h>
+#include <handler.h>
+
 #include "pci.h"
-#include "handler.h"
 #include "device.h"
 
 typedef struct _device_io_state {

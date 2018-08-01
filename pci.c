@@ -9,7 +9,8 @@
 
 #include <xenctrl.h>
 
-#include "debug.h"
+#include <debug.h>
+
 #include "pci.h"
 
 typedef struct pci_bar {

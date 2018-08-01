@@ -5,7 +5,8 @@ OBJS :=	device.o \
 	handler.o \
 	pci.o \
 	varstored.o \
-	xapidb.o
+	xapidb.o \
+	xapidb-lib.o
 
 CFLAGS  = -I$(shell pwd)/include
 
@@ -25,14 +26,16 @@ endif
 LDLIBS += -lxenstore -lxenctrl -lcrypto $$(pkg-config --libs libxml-2.0)
 
 # Get gcc to generate the dependencies for us.
-CFLAGS   += -Wp,-MD,$(@D)/.$(@F).d
+CFLAGS   += -Wp,-MD,$(@D)/.$(@F).d -MT $(@D)/$(@F)
 
 SUBDIRS  = $(filter-out ./,$(dir $(OBJS) $(LIBS)))
-DEPS     = .*.d
+DEPS     = .*.d tools/.*.d
 
 LDFLAGS := -g 
 
-all: $(TARGET)
+all: $(TARGET) tools auth
+
+.PHONY: all
 
 $(TARGET): $(LIBS) $(OBJS)
 	gcc -o $@ $(LDFLAGS) $(OBJS) $(LIBS) $(LDLIBS)
@@ -40,8 +43,19 @@ $(TARGET): $(LIBS) $(OBJS)
 %.o: %.c
 	gcc -o $@ $(CFLAGS) -c $<
 
+TOOLLIBS := -lcrypto $$(pkg-config --libs libxml-2.0)
+TOOLOBJS := tools/xapidb-cmdline.o tools/tool-lib.o guid.o handler.o xapidb-lib.o
+TOOLS := tools/varstore-ls tools/varstore-get tools/varstore-rm tools/varstore-set
+
+tools: $(TOOLS)
+
+.PHONY: tools
+
+$(TOOLS): %: $(TOOLOBJS) %.o
+	gcc -o $@ $(LDFLAGS) $^ $(TOOLLIBS)
+
 check: testPK.pem testPK.key testPK2.pem testPK2.key guid.o
-	gcc -Wall -g -o test test.c guid.o $$(pkg-config --cflags --libs glib-2.0) -lcrypto
+	gcc -Wall -g -o test test.c guid.o -Iinclude $$(pkg-config --cflags --libs glib-2.0) -lcrypto
 	./test
 
 .PHONY: check
@@ -52,7 +66,7 @@ auth: $(AUTHS)
 .PHONY: auth
 
 create-auth: create-auth.c guid.o
-	gcc -Wall -o create-auth create-auth.c guid.o -lcrypto
+	gcc -Wall -o create-auth create-auth.c guid.o -Iinclude -lcrypto
 
 %.pem %.key:
 	openssl req -new -x509 -newkey rsa:2048 -subj "/CN=$*/" -keyout $*.key -out $*.pem -days 36500 -nodes -sha256
@@ -76,6 +90,7 @@ clean:
 	rm -f $(AUTHS)
 	rm -f create-auth
 	rm -f PK.pem PK.key
+	rm -f $(TOOLS) $(TOOLOBJS) $(TOOLS:%=%.o)
 
 .PHONY: TAGS
 TAGS:

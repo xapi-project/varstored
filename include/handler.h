@@ -1,6 +1,7 @@
 #ifndef  HANDLER_H
 #define  HANDLER_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "efi.h"

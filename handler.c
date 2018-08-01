@@ -12,12 +12,12 @@
 #include <openssl/pkcs7.h>
 #include <openssl/err.h>
 
-#include "backend.h"
-#include "debug.h"
-#include "efi.h"
-#include "guid.h"
-#include "serialize.h"
-#include "handler.h"
+#include <backend.h>
+#include <debug.h>
+#include <efi.h>
+#include <guid.h>
+#include <serialize.h>
+#include <handler.h>
 
 /* Some values from edk2. */
 uint8_t mOidValue[9] = {0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02};
