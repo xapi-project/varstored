@@ -57,11 +57,13 @@ typedef unsigned short CHAR16;
 #define EFI_END_OF_MEDIA          EFIERR (28)
 #define EFI_END_OF_FILE           EFIERR (31)
 #define EFI_INVALID_LANGUAGE      EFIERR (32)
+#define EFI_COMPROMISED_DATA      EFIERR (33)
 
 #define EFI_WARN_UNKNOWN_GLYPH    EFIWARN (1)
 #define EFI_WARN_DELETE_FAILURE   EFIWARN (2)
 #define EFI_WARN_WRITE_FAILURE    EFIWARN (3)
 #define EFI_WARN_BUFFER_TOO_SMALL EFIWARN (4)
+#define EFI_WARN_STALE_DATA       EFIWARN (5)
 
 
 ///
