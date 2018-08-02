@@ -77,6 +77,7 @@ static sig_atomic_t run_main_loop = 1;
 static const char *prog;
 struct backend *db;
 bool opt_resume;
+enum log_level log_level = LOG_LVL_DEBUG;
 
 static void __attribute__((noreturn))
 usage(void)
