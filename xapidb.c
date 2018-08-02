@@ -28,7 +28,8 @@
 #define DB_HEADER_LEN \
     (strlen(DB_MAGIC) + sizeof(UINT32) + sizeof(UINTN) + sizeof(UINTN))
 
-#define MAX_FILE_SIZE (1024 * 1024)
+#define MAX_FILE_SIZE (128 * 1024)
+#define MAX_HTTP_SIZE (128 * 1024)
 
 /* Path to the file containing the initial data from XAPI. */
 static char *arg_init;
@@ -528,7 +529,7 @@ xmlrpc_call(char **response, const char *fmt, ...)
     int fd, status;
     size_t n;
     char *ptr, *request, *content;
-    char buf[1024];
+    char buf[MAX_HTTP_SIZE];
 
     va_start(ap, fmt);
     if (vasprintf(&content, fmt, ap) == -1) {
