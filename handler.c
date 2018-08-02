@@ -58,7 +58,7 @@ uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
  * This ensures a suitably low limit on the number of variables that can be
  * stored.
  */
-#define VARIABLE_SIZE_MIN 64
+#define VARIABLE_SIZE_OVERHEAD 128
 
 #define AUTH_PATH_PREFIX "/usr/share/varstored"
 
@@ -73,9 +73,7 @@ get_space_usage(void)
 
     l = var_list;
     while (l) {
-        uint64_t amount = l->name_len + l->data_len;
-
-        total += amount < VARIABLE_SIZE_MIN ? VARIABLE_SIZE_MIN : amount;
+        total += l->name_len + l->data_len + VARIABLE_SIZE_OVERHEAD;
         l = l->next;
     }
 
@@ -1412,7 +1410,8 @@ do_set_variable(uint8_t *comm_buf)
             data_len = payload_len;
         }
 
-        if (get_space_usage() + name_len + data_len > TOTAL_LIMIT) {
+        if (get_space_usage() + name_len + data_len +
+                VARIABLE_SIZE_OVERHEAD > TOTAL_LIMIT) {
             serialize_result(&ptr, EFI_OUT_OF_RESOURCES);
             goto err;
         }

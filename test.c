@@ -726,7 +726,7 @@ static void test_query_variable_info(void)
      * "overhead" size.
      */
 
-    longname = alloc_dstring_unset(VARIABLE_SIZE_MIN / sizeof(uint16_t));
+    longname = alloc_dstring_unset(VARIABLE_SIZE_OVERHEAD / sizeof(uint16_t));
     memset(longname->data, 'a', dstring_data_size(longname));
 
     /* Check the defined limits with no variables. */
@@ -746,7 +746,8 @@ static void test_query_variable_info(void)
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
     g_assert_cmpuint(TOTAL_LIMIT, ==, unserialize_uintn(&ptr));
-    g_assert_cmpuint(TOTAL_LIMIT - dstring_data_size(longname) - sizeof(tdata1),
+    g_assert_cmpuint(TOTAL_LIMIT - dstring_data_size(longname) -
+                     sizeof(tdata1) - VARIABLE_SIZE_OVERHEAD,
                      ==, unserialize_uintn(&ptr));
     g_assert_cmpuint(DATA_LIMIT, ==, unserialize_uintn(&ptr));
 
@@ -757,7 +758,8 @@ static void test_query_variable_info(void)
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
     g_assert_cmpuint(TOTAL_LIMIT, ==, unserialize_uintn(&ptr));
-    g_assert_cmpuint(TOTAL_LIMIT - dstring_data_size(longname) - sizeof(tdata2),
+    g_assert_cmpuint(TOTAL_LIMIT - dstring_data_size(longname) -
+                     sizeof(tdata2) - VARIABLE_SIZE_OVERHEAD,
                      ==, unserialize_uintn(&ptr));
     g_assert_cmpuint(DATA_LIMIT, ==, unserialize_uintn(&ptr));
 
@@ -770,7 +772,7 @@ static void test_query_variable_info(void)
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
     g_assert_cmpuint(TOTAL_LIMIT, ==, unserialize_uintn(&ptr));
     g_assert_cmpuint(TOTAL_LIMIT - dstring_data_size(longname) -
-                     sizeof(tdata2) - sizeof(tdata1),
+                     sizeof(tdata2) - sizeof(tdata1) - VARIABLE_SIZE_OVERHEAD,
                      ==, unserialize_uintn(&ptr));
     g_assert_cmpuint(DATA_LIMIT, ==, unserialize_uintn(&ptr));
 
@@ -1342,8 +1344,7 @@ static void test_set_variable_resource_limit(void)
     uint8_t *ptr;
     EFI_STATUS status;
     UINTN remaining;
-#define TMP_SIZE 65536
-    uint8_t tmp[TMP_SIZE] = {0};
+    uint8_t tmp[TOTAL_LIMIT] = {0};
 
     reset_vars();
 
@@ -1356,8 +1357,8 @@ static void test_set_variable_resource_limit(void)
     sv_ok(tname1, &tguid1, tmp, DATA_LIMIT, ATTR_B);
 
     /* Use all the remaining space */
-    remaining = TMP_SIZE - DATA_LIMIT - dstring_data_size(tname1) -
-                dstring_data_size(tname2);
+    remaining = TOTAL_LIMIT - DATA_LIMIT - dstring_data_size(tname1) -
+                dstring_data_size(tname2) - 2 * VARIABLE_SIZE_OVERHEAD;
     sv_ok(tname2, &tguid2, tmp, remaining, ATTR_B);
 
     /* Cannot use any more space with a new variable */
@@ -1390,16 +1391,18 @@ static void test_set_variable_many_vars(void)
     uint8_t tmp = 0;
     dstring *dname = alloc_dstring_unset(5);
     char *name = (char *)dname->data;
+    const int count = TOTAL_LIMIT /
+                      (VARIABLE_SIZE_OVERHEAD + dstring_data_size(dname) + 1);
 
     reset_vars();
 
     /* Set more variables than are allowed based on the variable "overhead". */
-    for (i = 0; i < (TOTAL_LIMIT / VARIABLE_SIZE_MIN) + 1; i++) {
+    for (i = 0; i < count + 1; i++) {
         sprintf(name, "%04d", i);
         call_set_variable(dname, &tguid1, &tmp, 1, ATTR_B, 0);
         ptr = buf;
         status = unserialize_uintn(&ptr);
-        if (i == (TOTAL_LIMIT / VARIABLE_SIZE_MIN))
+        if (i == count)
             g_assert_cmpuint(status, ==, EFI_OUT_OF_RESOURCES);
         else
             g_assert_cmpuint(status, ==, EFI_SUCCESS);
