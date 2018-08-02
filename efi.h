@@ -110,7 +110,7 @@ typedef struct __attribute__((packed)) {
 } EFI_TIME;
 
 typedef struct __attribute__((packed)) {
-    char data[GUID_LEN];
+    uint8_t data[GUID_LEN];
 } EFI_GUID;
 
 typedef struct __attribute__((packed)) {
