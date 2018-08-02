@@ -15,35 +15,32 @@
 #include "backend.h"
 #include "debug.h"
 #include "efi.h"
+#include "guid.h"
 #include "serialize.h"
 #include "handler.h"
 
 /* Some values from edk2. */
-char gEfiCertPkcs7Guid[] = {0x9d,0xd2,0xaf,0x4a,0xdf,0x68,0xee,0x49,0x8a,0xa9,0x34,0x7d,0x37,0x56,0x65,0xa7};
 uint8_t mOidValue[9] = {0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02};
-char gEfiGlobalVariableGuid[] = {0x61,0xdf,0xe4,0x8b,0xca,0x93,0xd2,0x11,0xaa,0x0d,0x00,0xe0,0x98,0x03,0x2b,0x8c};
 uint8_t mSignatureSupport[] = {
     0x12,0xa5,0x6c,0x82,0x10,0xcf,0xc9,0x4a,0xb1,0x87,0xbe,0x01,0x49,0x66,0x31,0xbd, /* EFI_CERT_SHA1_GUID */
     0x26,0x16,0xc4,0xc1,0x4c,0x50,0x92,0x40,0xac,0xa9,0x41,0xf9,0x36,0x93,0x43,0x28, /* EFI_CERT_SHA256_GUID */
     0xe8,0x66,0x57,0x3c,0x9c,0x26,0x34,0x4e,0xaa,0x14,0xed,0x77,0x6e,0x85,0xb3,0xb6, /* EFI_CERT_RSA2048_GUID */
     0xa1,0x59,0xc0,0xa5,0xe4,0x94,0xa7,0x4a,0x87,0xb5,0xab,0x15,0x5c,0x2b,0xf0,0x72, /* EFI_CERT_X509_GUID */
 };
-char gEfiCertX509Guid[] = {0xa1,0x59,0xc0,0xa5,0xe4,0x94,0xa7,0x4a,0x87,0xb5,0xab,0x15,0x5c,0x2b,0xf0,0x72};
-char gEfiImageSecurityDatabaseGuid[] = {0xcb,0xb2,0x19,0xd7,0x3a,0x3d,0x96,0x45,0xa3,0xbc,0xda,0xd0,0xe,0x67,0x65,0x6f};
 
 EFI_SIGNATURE_ITEM mSupportSigItem[] = {
-    {{0x26,0x16,0xc4,0xc1,0x4c,0x50,0x92,0x40,0xac,0xa9,0x41,0xf9,0x36,0x93,0x43,0x28}, 0, 32           }, /* EFI_CERT_SHA256_GUID */
-    {{0xe8,0x66,0x57,0x3c,0x9c,0x26,0x34,0x4e,0xaa,0x14,0xed,0x77,0x6e,0x85,0xb3,0xb6}, 0, 256          }, /* EFI_CERT_RSA2048_GUID */
-    {{0x90,0x61,0xb3,0xe2,0x9b,0x87,0x3d,0x4a,0xad,0x8d,0xf2,0xe7,0xbb,0xa3,0x27,0x84}, 0, 256          }, /* EFI_CERT_RSA2048_SHA256_GUID */
-    {{0x12,0xa5,0x6c,0x82,0x10,0xcf,0xc9,0x4a,0xb1,0x87,0xbe,0x01,0x49,0x66,0x31,0xbd}, 0, 20           }, /* EFI_CERT_SHA1_GUID */
-    {{0x4f,0x44,0xf8,0x67,0x43,0x87,0xf1,0x48,0xa3,0x28,0x1e,0xaa,0xb8,0x73,0x60,0x80}, 0, 256          }, /* EFI_CERT_RSA2048_SHA1_GUID */
-    {{0xa1,0x59,0xc0,0xa5,0xe4,0x94,0xa7,0x4a,0x87,0xb5,0xab,0x15,0x5c,0x2b,0xf0,0x72}, 0, ((UINT32) ~0)}, /* EFI_CERT_X509_GUID */
-    {{0x33,0x52,0x6e,0x0b,0x5c,0xa6,0xc9,0x44,0x94,0x07,0xd9,0xab,0x83,0xbf,0xc8,0xbd}, 0, 28           }, /* EFI_CERT_SHA224_GUID */
-    {{0x07,0x53,0x3e,0xff,0xd0,0x9f,0xc9,0x48,0x85,0xf1,0x8a,0xd5,0x6c,0x70,0x1e,0x01}, 0, 48           }, /* EFI_CERT_SHA384_GUID */
-    {{0xae,0x0f,0x3e,0x09,0xc4,0xa6,0x50,0x4f,0x9f,0x1b,0xd4,0x1e,0x2b,0x89,0xc1,0x9a}, 0, 64           }, /* EFI_CERT_SHA512_GUID */
-    {{0x92,0xa4,0xd2,0x3b,0xc0,0x96,0x79,0x40,0xb4,0x20,0xfc,0xf9,0x8e,0xf1,0x03,0xed}, 0, 48           }, /* EFI_CERT_X509_SHA256_GUID */
-    {{0x6e,0x87,0x76,0x70,0xc2,0x80,0xe6,0x4e,0xaa,0xd2,0x28,0xb3,0x49,0xa6,0x86,0x5b}, 0, 64           }, /* EFI_CERT_X509_SHA384_GUID */
-    {{0x63,0xbf,0x6d,0x44,0x02,0x25,0xda,0x4c,0xbc,0xfa,0x24,0x65,0xd2,0xb0,0xfe,0x9d}, 0, 80           } /* EFI_CERT_X509_SHA512_GUID */
+    {{{0x26, 0x16, 0xc4, 0xc1, 0x4c, 0x50, 0x92, 0x40, 0xac, 0xa9, 0x41, 0xf9, 0x36, 0x93, 0x43, 0x28}}, 0, 32           }, /* EFI_CERT_SHA256_GUID */
+    {{{0xe8, 0x66, 0x57, 0x3c, 0x9c, 0x26, 0x34, 0x4e, 0xaa, 0x14, 0xed, 0x77, 0x6e, 0x85, 0xb3, 0xb6}}, 0, 256          }, /* EFI_CERT_RSA2048_GUID */
+    {{{0x90, 0x61, 0xb3, 0xe2, 0x9b, 0x87, 0x3d, 0x4a, 0xad, 0x8d, 0xf2, 0xe7, 0xbb, 0xa3, 0x27, 0x84}}, 0, 256          }, /* EFI_CERT_RSA2048_SHA256_GUID */
+    {{{0x12, 0xa5, 0x6c, 0x82, 0x10, 0xcf, 0xc9, 0x4a, 0xb1, 0x87, 0xbe, 0x01, 0x49, 0x66, 0x31, 0xbd}}, 0, 20           }, /* EFI_CERT_SHA1_GUID */
+    {{{0x4f, 0x44, 0xf8, 0x67, 0x43, 0x87, 0xf1, 0x48, 0xa3, 0x28, 0x1e, 0xaa, 0xb8, 0x73, 0x60, 0x80}}, 0, 256          }, /* EFI_CERT_RSA2048_SHA1_GUID */
+    {{{0xa1, 0x59, 0xc0, 0xa5, 0xe4, 0x94, 0xa7, 0x4a, 0x87, 0xb5, 0xab, 0x15, 0x5c, 0x2b, 0xf0, 0x72}}, 0, ((UINT32) ~0)}, /* EFI_CERT_X509_GUID */
+    {{{0x33, 0x52, 0x6e, 0x0b, 0x5c, 0xa6, 0xc9, 0x44, 0x94, 0x07, 0xd9, 0xab, 0x83, 0xbf, 0xc8, 0xbd}}, 0, 28           }, /* EFI_CERT_SHA224_GUID */
+    {{{0x07, 0x53, 0x3e, 0xff, 0xd0, 0x9f, 0xc9, 0x48, 0x85, 0xf1, 0x8a, 0xd5, 0x6c, 0x70, 0x1e, 0x01}}, 0, 48           }, /* EFI_CERT_SHA384_GUID */
+    {{{0xae, 0x0f, 0x3e, 0x09, 0xc4, 0xa6, 0x50, 0x4f, 0x9f, 0x1b, 0xd4, 0x1e, 0x2b, 0x89, 0xc1, 0x9a}}, 0, 64           }, /* EFI_CERT_SHA512_GUID */
+    {{{0x92, 0xa4, 0xd2, 0x3b, 0xc0, 0x96, 0x79, 0x40, 0xb4, 0x20, 0xfc, 0xf9, 0x8e, 0xf1, 0x03, 0xed}}, 0, 48           }, /* EFI_CERT_X509_SHA256_GUID */
+    {{{0x6e, 0x87, 0x76, 0x70, 0xc2, 0x80, 0xe6, 0x4e, 0xaa, 0xd2, 0x28, 0xb3, 0x49, 0xa6, 0x86, 0x5b}}, 0, 64           }, /* EFI_CERT_X509_SHA384_GUID */
+    {{{0x63, 0xbf, 0x6d, 0x44, 0x02, 0x25, 0xda, 0x4c, 0xbc, 0xfa, 0x24, 0x65, 0xd2, 0xb0, 0xfe, 0x9d}}, 0, 80           } /* EFI_CERT_X509_SHA512_GUID */
 };
 
 uint8_t EFI_SETUP_MODE_NAME[] = {'S',0,'e',0,'t',0,'u',0,'p',0,'M',0,'o',0,'d',0,'e',0};
@@ -87,7 +84,7 @@ get_space_usage(void)
 
 /* A limited version of SetVariable for internal use. */
 static EFI_STATUS
-internal_set_variable(const uint8_t *name, UINTN name_len, char *guid,
+internal_set_variable(const uint8_t *name, UINTN name_len, EFI_GUID *guid,
                       uint8_t *data, UINTN data_len, UINT32 attr)
 {
     struct efi_variable *l;
@@ -102,7 +99,7 @@ internal_set_variable(const uint8_t *name, UINTN name_len, char *guid,
     while (l) {
         if (l->name_len == name_len &&
                 !memcmp(l->name, name, name_len) &&
-                !memcmp(l->guid, guid, GUID_LEN)) {
+                !memcmp(&l->guid, guid, GUID_LEN)) {
             free(l->data);
             l->data = new_data;
             l->data_len = data_len;
@@ -124,7 +121,7 @@ internal_set_variable(const uint8_t *name, UINTN name_len, char *guid,
     }
     memcpy(l->name, name, name_len);
     l->name_len = name_len;
-    memcpy(l->guid, guid, GUID_LEN);
+    memcpy(&l->guid, guid, GUID_LEN);
     l->data = new_data;
     l->data_len = data_len;
     l->attributes = attr;
@@ -136,7 +133,7 @@ internal_set_variable(const uint8_t *name, UINTN name_len, char *guid,
 
 /* A limited version of GetVariable for internal use. */
 static EFI_STATUS
-internal_get_variable(const uint8_t *name, UINTN name_len, char *guid,
+internal_get_variable(const uint8_t *name, UINTN name_len, EFI_GUID *guid,
                       uint8_t **data, UINTN *data_len)
 {
     struct efi_variable *l;
@@ -145,7 +142,7 @@ internal_get_variable(const uint8_t *name, UINTN name_len, char *guid,
     while (l) {
         if (l->name_len == name_len &&
                 !memcmp(l->name, name, name_len) &&
-                !memcmp(l->guid, guid, GUID_LEN)) {
+                !memcmp(&l->guid, guid, GUID_LEN)) {
 
             *data = malloc(l->data_len);
             memcpy(*data, l->data, l->data_len);
@@ -162,7 +159,7 @@ static void
 do_get_variable(uint8_t *comm_buf)
 {
     uint8_t *ptr, *name;
-    char guid[GUID_LEN];
+    EFI_GUID guid;
     UINTN name_len, data_len;
     BOOLEAN at_runtime;
     struct efi_variable *l;
@@ -175,7 +172,7 @@ do_get_variable(uint8_t *comm_buf)
         serialize_result(&comm_buf, name_len == 0 ? EFI_NOT_FOUND : EFI_DEVICE_ERROR);
         return;
     }
-    unserialize_guid(&ptr, guid);
+    unserialize_guid(&ptr, &guid);
     data_len = unserialize_uintn(&ptr);
     at_runtime = unserialize_boolean(&ptr);
 
@@ -184,7 +181,7 @@ do_get_variable(uint8_t *comm_buf)
     while (l) {
         if (l->name_len == name_len &&
                 !memcmp(l->name, name, name_len) &&
-                !memcmp(l->guid, guid, GUID_LEN)) {
+                !memcmp(&l->guid, &guid, GUID_LEN)) {
             if (at_runtime && !(l->attributes & EFI_VARIABLE_RUNTIME_ACCESS)) {
                 l = l->next;
                 continue;
@@ -604,7 +601,7 @@ check_signature_list_format(uint8_t *name, UINTN name_len,
 
     while ((remaining > 0) && (remaining >= sig_list->SignatureListSize)) {
         for (i = 0; i < (sizeof(mSupportSigItem) / sizeof(EFI_SIGNATURE_ITEM)); i++ ) {
-            if (!memcmp(&sig_list->SignatureType, mSupportSigItem[i].SigType,
+            if (!memcmp(&sig_list->SignatureType, &mSupportSigItem[i].SigType,
                         GUID_LEN)) {
                 if (mSupportSigItem[i].SigDataSize != (UINT32)~0 &&
                         (sig_list->SignatureSize - GUID_LEN) != mSupportSigItem[i].SigDataSize)
@@ -619,7 +616,7 @@ check_signature_list_format(uint8_t *name, UINTN name_len,
         if (i == (sizeof (mSupportSigItem) / sizeof (EFI_SIGNATURE_ITEM)))
             return EFI_INVALID_PARAMETER;
 
-        if (!memcmp(&sig_list->SignatureType, gEfiCertX509Guid, GUID_LEN)) {
+        if (!memcmp(&sig_list->SignatureType, &gEfiCertX509Guid, GUID_LEN)) {
             EFI_SIGNATURE_DATA *cert_data;
             UINTN cert_len;
             X509 *cert;
@@ -681,7 +678,7 @@ check_signature_list_format(uint8_t *name, UINTN name_len,
 static EFI_STATUS
 verify_auth_var_type(uint8_t *name, UINTN name_len,
                      uint8_t *data, UINTN data_len,
-                     char *guid, UINT32 attr, bool append,
+                     EFI_GUID *guid, UINT32 attr, bool append,
                      struct efi_variable *cur, enum auth_type auth_type,
                      uint8_t **payload_out, UINTN *payload_len_out,
                      uint8_t *digest, EFI_TIME *timestamp)
@@ -713,7 +710,7 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
         return EFI_SECURITY_VIOLATION;
 
     if ((d->AuthInfo.Hdr.wCertificateType != WIN_CERT_TYPE_EFI_GUID) ||
-            memcmp(d->AuthInfo.CertType, gEfiCertPkcs7Guid, GUID_LEN))
+            memcmp(&d->AuthInfo.CertType, &gEfiCertPkcs7Guid, GUID_LEN))
         return EFI_SECURITY_VIOLATION;
 
     sig_len = d->AuthInfo.Hdr.dwLength - offsetof(WIN_CERTIFICATE_UEFI_GUID, CertData);
@@ -763,7 +760,7 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
 
         status = internal_get_variable(EFI_PLATFORM_KEY_NAME,
                                        sizeof(EFI_PLATFORM_KEY_NAME),
-                                       gEfiGlobalVariableGuid,
+                                       &gEfiGlobalVariableGuid,
                                        &var_data, &var_len);
         if (status != EFI_SUCCESS) {
             status = EFI_SECURITY_VIOLATION;
@@ -797,7 +794,7 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
 
         status = internal_get_variable(EFI_KEY_EXCHANGE_KEY_NAME,
                                        sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
-                                       gEfiGlobalVariableGuid,
+                                       &gEfiGlobalVariableGuid,
                                        &var_data, &var_len);
         if (status != EFI_SUCCESS) {
             status = EFI_SECURITY_VIOLATION;
@@ -807,7 +804,7 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
         remaining = (UINT32)var_len;
         cert_list = (EFI_SIGNATURE_LIST *)var_data;
         while ((remaining > 0) && (remaining >= cert_list->SignatureListSize)) {
-            if (!memcmp(&cert_list->SignatureType, gEfiCertX509Guid, GUID_LEN)) {
+            if (!memcmp(&cert_list->SignatureType, &gEfiCertX509Guid, GUID_LEN)) {
                 cert = (EFI_SIGNATURE_DATA *)((uint8_t *)cert_list +
                        sizeof(EFI_SIGNATURE_LIST) + cert_list->SignatureHeaderSize);
                 count  = (cert_list->SignatureListSize - sizeof(EFI_SIGNATURE_LIST) -
@@ -920,7 +917,7 @@ out:
 
 static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
                                   uint8_t *data, UINTN data_len,
-                                  char *guid, UINT32 attr, bool append,
+                                  EFI_GUID *guid, UINT32 attr, bool append,
                                   struct efi_variable *cur,
                                   uint8_t **payload_out, UINTN *payload_len_out,
                                   uint8_t *digest, EFI_TIME *timestamp)
@@ -934,7 +931,7 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
 
     status = internal_get_variable(EFI_SETUP_MODE_NAME,
                                    sizeof(EFI_SETUP_MODE_NAME),
-                                   gEfiGlobalVariableGuid, &var, &var_len);
+                                   &gEfiGlobalVariableGuid, &var, &var_len);
     if (status != EFI_SUCCESS)
         return status;
     setup_mode = var[0];
@@ -942,7 +939,7 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
 
     if (name_len == sizeof(EFI_PLATFORM_KEY_NAME) &&
             !memcmp(name, EFI_PLATFORM_KEY_NAME, name_len) &&
-            !memcmp(guid, gEfiGlobalVariableGuid, GUID_LEN)) {
+            !memcmp(guid, &gEfiGlobalVariableGuid, GUID_LEN)) {
         if (setup_mode == 1)
             status = verify_auth_var_type(name, name_len,
                                           data, data_len,
@@ -970,7 +967,7 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
             setup_mode = 0;
             status = internal_set_variable(EFI_SETUP_MODE_NAME,
                                            sizeof(EFI_SETUP_MODE_NAME),
-                                           gEfiGlobalVariableGuid,
+                                           &gEfiGlobalVariableGuid,
                                            &setup_mode,
                                            sizeof(setup_mode),
                                            ATTR_BR);
@@ -978,7 +975,7 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
             secure_boot = secure_boot_enable;
             status = internal_set_variable(EFI_SECURE_BOOT_MODE_NAME,
                                            sizeof(EFI_SECURE_BOOT_MODE_NAME),
-                                           gEfiGlobalVariableGuid,
+                                           &gEfiGlobalVariableGuid,
                                            &secure_boot,
                                            sizeof(secure_boot),
                                            ATTR_BR);
@@ -986,7 +983,7 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
             setup_mode = 1;
             status = internal_set_variable(EFI_SETUP_MODE_NAME,
                                            sizeof(EFI_SETUP_MODE_NAME),
-                                           gEfiGlobalVariableGuid,
+                                           &gEfiGlobalVariableGuid,
                                            &setup_mode,
                                            sizeof(setup_mode),
                                            ATTR_BR);
@@ -994,14 +991,14 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
             secure_boot = 0;
             status = internal_set_variable(EFI_SECURE_BOOT_MODE_NAME,
                                            sizeof(EFI_SECURE_BOOT_MODE_NAME),
-                                           gEfiGlobalVariableGuid,
+                                           &gEfiGlobalVariableGuid,
                                            &secure_boot,
                                            sizeof(secure_boot),
                                            ATTR_BR);
         }
     } else if (name_len == sizeof(EFI_KEY_EXCHANGE_KEY_NAME) &&
             !memcmp(name, EFI_KEY_EXCHANGE_KEY_NAME, name_len) &&
-            !memcmp(guid, gEfiGlobalVariableGuid, GUID_LEN)) {
+            !memcmp(guid, &gEfiGlobalVariableGuid, GUID_LEN)) {
         status = verify_auth_var_type(name, name_len,
                                       data, data_len,
                                       guid, attr, append,
@@ -1012,7 +1009,7 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
             status = check_signature_list_format(name, name_len,
                                                  *payload_out, *payload_len_out,
                                                  false);
-    } else if (!memcmp(guid, gEfiImageSecurityDatabaseGuid, GUID_LEN) &&
+    } else if (!memcmp(guid, &gEfiImageSecurityDatabaseGuid, GUID_LEN) &&
                ((name_len == sizeof(EFI_IMAGE_SECURITY_DATABASE) &&
                  !memcmp(name, EFI_IMAGE_SECURITY_DATABASE, name_len)) ||
                 (name_len == sizeof(EFI_IMAGE_SECURITY_DATABASE1) &&
@@ -1063,39 +1060,39 @@ out:
 }
 
 static bool
-check_ro_variable(uint8_t *name, UINTN name_len, char *guid)
+check_ro_variable(uint8_t *name, UINTN name_len, EFI_GUID *guid)
 {
     if ((name_len == sizeof(EFI_AUDIT_MODE_NAME) &&
             !memcmp(name, EFI_AUDIT_MODE_NAME, name_len) &&
-            !memcmp(guid, gEfiGlobalVariableGuid, GUID_LEN)) ||
+            !memcmp(guid, &gEfiGlobalVariableGuid, GUID_LEN)) ||
         (name_len == sizeof(EFI_DEPLOYED_MODE_NAME) &&
             !memcmp(name, EFI_DEPLOYED_MODE_NAME, name_len) &&
-            !memcmp(guid, gEfiGlobalVariableGuid, GUID_LEN)) ||
+            !memcmp(guid, &gEfiGlobalVariableGuid, GUID_LEN)) ||
         (name_len == sizeof(EFI_SECURE_BOOT_MODE_NAME) &&
             !memcmp(name, EFI_SECURE_BOOT_MODE_NAME, name_len) &&
-            !memcmp(guid, gEfiGlobalVariableGuid, GUID_LEN)) ||
+            !memcmp(guid, &gEfiGlobalVariableGuid, GUID_LEN)) ||
         (name_len == sizeof(EFI_SETUP_MODE_NAME) &&
             !memcmp(name, EFI_SETUP_MODE_NAME, name_len) &&
-            !memcmp(guid, gEfiGlobalVariableGuid, GUID_LEN)) ||
+            !memcmp(guid, &gEfiGlobalVariableGuid, GUID_LEN)) ||
         (name_len == sizeof(EFI_SIGNATURE_SUPPORT_NAME) &&
             !memcmp(name, EFI_SIGNATURE_SUPPORT_NAME, name_len) &&
-            !memcmp(guid, gEfiGlobalVariableGuid, GUID_LEN)))
+            !memcmp(guid, &gEfiGlobalVariableGuid, GUID_LEN)))
         return true;
     return false;
 }
 
 static bool
-check_attr(uint8_t *name, UINTN name_len, char *guid, UINT32 attr)
+check_attr(uint8_t *name, UINTN name_len, EFI_GUID *guid, UINT32 attr)
 {
     if ((name_len == sizeof(EFI_PLATFORM_KEY_NAME) &&
             !memcmp(name, EFI_PLATFORM_KEY_NAME, name_len) &&
-            !memcmp(guid, gEfiGlobalVariableGuid, GUID_LEN)) ||
+            !memcmp(guid, &gEfiGlobalVariableGuid, GUID_LEN)) ||
         (name_len == sizeof(EFI_KEY_EXCHANGE_KEY_NAME) &&
             !memcmp(name, EFI_KEY_EXCHANGE_KEY_NAME, name_len) &&
-            !memcmp(guid, gEfiGlobalVariableGuid, GUID_LEN))) {
+            !memcmp(guid, &gEfiGlobalVariableGuid, GUID_LEN))) {
         if (attr != (ATTR_BRNV | EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS))
             return true;
-    } else if (!memcmp(guid, gEfiImageSecurityDatabaseGuid, GUID_LEN) &&
+    } else if (!memcmp(guid, &gEfiImageSecurityDatabaseGuid, GUID_LEN) &&
                ((name_len == sizeof(EFI_IMAGE_SECURITY_DATABASE) &&
                  !memcmp(name, EFI_IMAGE_SECURITY_DATABASE, name_len)) ||
                 (name_len == sizeof(EFI_IMAGE_SECURITY_DATABASE1) &&
@@ -1205,7 +1202,7 @@ do_set_variable(uint8_t *comm_buf)
     UINTN name_len, data_len;
     struct efi_variable *l, *prev = NULL;
     uint8_t *ptr, *name, *data;
-    char guid[GUID_LEN];
+    EFI_GUID guid;
     UINT32 attr;
     BOOLEAN at_runtime, append;
     EFI_STATUS status;
@@ -1220,7 +1217,7 @@ do_set_variable(uint8_t *comm_buf)
         serialize_result(&comm_buf, name_len == 0 ? EFI_INVALID_PARAMETER : EFI_DEVICE_ERROR);
         return;
     }
-    unserialize_guid(&ptr, guid);
+    unserialize_guid(&ptr, &guid);
     data = unserialize_data(&ptr, &data_len, DATA_LIMIT);
     if (!data && data_len) {
         serialize_result(&comm_buf, data_len > DATA_LIMIT ? EFI_OUT_OF_RESOURCES : EFI_DEVICE_ERROR);
@@ -1263,7 +1260,7 @@ do_set_variable(uint8_t *comm_buf)
     while (l) {
         if (l->name_len == name_len &&
                 !memcmp(l->name, name, name_len) &&
-                !memcmp(l->guid, guid, GUID_LEN)) {
+                !memcmp(&l->guid, &guid, GUID_LEN)) {
             bool should_save = !!(l->attributes & EFI_VARIABLE_NON_VOLATILE);
 
             /* Only runtime variables can be updated/deleted at runtime. */
@@ -1278,7 +1275,7 @@ do_set_variable(uint8_t *comm_buf)
                 goto err;
             }
 
-            if (check_ro_variable(name, name_len, guid)) {
+            if (check_ro_variable(name, name_len, &guid)) {
                 serialize_result(&ptr, EFI_WRITE_PROTECTED);
                 goto err;
             }
@@ -1298,7 +1295,7 @@ do_set_variable(uint8_t *comm_buf)
 
                 status = verify_auth_var(name, name_len,
                                          data, data_len,
-                                         guid, attr, append,
+                                         &guid, attr, append,
                                          l,
                                          &payload, &payload_len,
                                          digest, &timestamp);
@@ -1329,7 +1326,7 @@ do_set_variable(uint8_t *comm_buf)
                     uint8_t *new_data;
 
                     if ((attr & EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS) &&
-                            !memcmp(guid, gEfiImageSecurityDatabaseGuid, GUID_LEN) &&
+                            !memcmp(&guid, &gEfiImageSecurityDatabaseGuid, GUID_LEN) &&
                             ((name_len == sizeof(EFI_IMAGE_SECURITY_DATABASE) &&
                               !memcmp(name, EFI_IMAGE_SECURITY_DATABASE, name_len)) ||
                              (name_len == sizeof(EFI_IMAGE_SECURITY_DATABASE1) &&
@@ -1391,7 +1388,7 @@ do_set_variable(uint8_t *comm_buf)
             goto err;
         }
 
-        if (check_attr(name, name_len, guid, attr)) {
+        if (check_attr(name, name_len, &guid, attr)) {
             serialize_result(&ptr, EFI_INVALID_PARAMETER);
             goto err;
         }
@@ -1402,7 +1399,7 @@ do_set_variable(uint8_t *comm_buf)
 
             status = verify_auth_var(name, name_len,
                                      data, data_len,
-                                     guid, attr, append,
+                                     &guid, attr, append,
                                      NULL,
                                      &payload, &payload_len,
                                      digest, &timestamp);
@@ -1428,7 +1425,7 @@ do_set_variable(uint8_t *comm_buf)
 
         l->name = name;
         l->name_len = name_len;
-        memcpy(l->guid, guid, GUID_LEN);
+        memcpy(&l->guid, &guid, GUID_LEN);
         l->data = data;
         l->data_len = data_len;
         l->attributes = attr;
@@ -1456,7 +1453,7 @@ do_get_next_variable(uint8_t *comm_buf)
     UINTN name_len, avail_len;
     uint8_t *ptr, *name;
     struct efi_variable *l;
-    char guid[GUID_LEN];
+    EFI_GUID guid;
     BOOLEAN at_runtime;
 
     ptr = comm_buf;
@@ -1468,7 +1465,7 @@ do_get_next_variable(uint8_t *comm_buf)
         serialize_result(&comm_buf, EFI_DEVICE_ERROR);
         return;
     }
-    unserialize_guid(&ptr, guid);
+    unserialize_guid(&ptr, &guid);
     at_runtime = unserialize_boolean(&ptr);
 
     ptr = comm_buf;
@@ -1478,7 +1475,7 @@ do_get_next_variable(uint8_t *comm_buf)
         while (l) {
             if (l->name_len == name_len &&
                     !memcmp(l->name, name, name_len) &&
-                    !memcmp(l->guid, guid, GUID_LEN) &&
+                    !memcmp(&l->guid, &guid, GUID_LEN) &&
                     (!at_runtime || (l->attributes & EFI_VARIABLE_RUNTIME_ACCESS)))
                 break;
             l = l->next;
@@ -1502,7 +1499,7 @@ do_get_next_variable(uint8_t *comm_buf)
         } else {
             serialize_result(&ptr, EFI_SUCCESS);
             serialize_data(&ptr, l->name, l->name_len);
-            serialize_guid(&ptr, l->guid);
+            serialize_guid(&ptr, &l->guid);
         }
     } else {
         serialize_result(&ptr, EFI_NOT_FOUND);
@@ -1587,7 +1584,7 @@ setup_variables(void)
 
     status = internal_set_variable(EFI_SIGNATURE_SUPPORT_NAME,
                                    sizeof(EFI_SIGNATURE_SUPPORT_NAME),
-                                   gEfiGlobalVariableGuid,
+                                   &gEfiGlobalVariableGuid,
                                    mSignatureSupport,
                                    sizeof(mSignatureSupport),
                                    ATTR_BR);
@@ -1596,7 +1593,7 @@ setup_variables(void)
 
     status = internal_get_variable(EFI_PLATFORM_KEY_NAME,
                                    sizeof(EFI_PLATFORM_KEY_NAME),
-                                   gEfiGlobalVariableGuid, &data, &data_len);
+                                   &gEfiGlobalVariableGuid, &data, &data_len);
     if (status == EFI_NOT_FOUND) {
         setup_mode = 1;
     } else if (status == EFI_SUCCESS) {
@@ -1608,7 +1605,7 @@ setup_variables(void)
 
     status = internal_set_variable(EFI_SETUP_MODE_NAME,
                                    sizeof(EFI_SETUP_MODE_NAME),
-                                   gEfiGlobalVariableGuid,
+                                   &gEfiGlobalVariableGuid,
                                    &setup_mode,
                                    sizeof(setup_mode),
                                    ATTR_BR);
@@ -1617,7 +1614,7 @@ setup_variables(void)
 
     status = internal_set_variable(EFI_AUDIT_MODE_NAME,
                                    sizeof(EFI_AUDIT_MODE_NAME),
-                                   gEfiGlobalVariableGuid,
+                                   &gEfiGlobalVariableGuid,
                                    &audit_mode,
                                    sizeof(audit_mode),
                                    ATTR_BR);
@@ -1626,7 +1623,7 @@ setup_variables(void)
 
     status = internal_set_variable(EFI_DEPLOYED_MODE_NAME,
                                    sizeof(EFI_DEPLOYED_MODE_NAME),
-                                   gEfiGlobalVariableGuid,
+                                   &gEfiGlobalVariableGuid,
                                    &deployed_mode,
                                    sizeof(deployed_mode),
                                    ATTR_BR);
@@ -1635,7 +1632,7 @@ setup_variables(void)
 
     status = internal_set_variable(EFI_SECURE_BOOT_MODE_NAME,
                                    sizeof(EFI_SECURE_BOOT_MODE_NAME),
-                                   gEfiGlobalVariableGuid,
+                                   &gEfiGlobalVariableGuid,
                                    &secure_boot,
                                    sizeof(secure_boot),
                                    ATTR_BR);
@@ -1646,7 +1643,7 @@ setup_variables(void)
 }
 
 static bool
-set_variable_from_auth(uint8_t *name, UINTN name_len, char *guid, char *path)
+set_variable_from_auth(uint8_t *name, UINTN name_len, EFI_GUID *guid, char *path)
 {
     uint8_t buf[SHMEM_SIZE];
     uint8_t *ptr, *data;
@@ -1704,21 +1701,21 @@ setup_keys(void)
 
     ret = set_variable_from_auth(EFI_PLATFORM_KEY_NAME,
                                  sizeof(EFI_PLATFORM_KEY_NAME),
-                                 gEfiGlobalVariableGuid,
+                                 &gEfiGlobalVariableGuid,
                                  AUTH_PATH_PREFIX "/PK.auth");
     if (!ret)
         return false;
 
     ret = set_variable_from_auth(EFI_KEY_EXCHANGE_KEY_NAME,
                                  sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
-                                 gEfiGlobalVariableGuid,
+                                 &gEfiGlobalVariableGuid,
                                  AUTH_PATH_PREFIX "/KEK.auth");
     if (!ret)
         return false;
 
     ret = set_variable_from_auth(EFI_IMAGE_SECURITY_DATABASE,
                                  sizeof(EFI_IMAGE_SECURITY_DATABASE),
-                                 gEfiImageSecurityDatabaseGuid,
+                                 &gEfiImageSecurityDatabaseGuid,
                                  AUTH_PATH_PREFIX "/db.auth");
 
     return ret;

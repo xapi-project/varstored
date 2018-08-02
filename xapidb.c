@@ -121,7 +121,7 @@ serialize_variables(uint8_t **out, bool only_nv)
 
         serialize_data(&ptr, l->name, l->name_len);
         serialize_data(&ptr, l->data, l->data_len);
-        serialize_guid(&ptr, l->guid);
+        serialize_guid(&ptr, &l->guid);
         serialize_uint32(&ptr, l->attributes);
         serialize_timestamp(&ptr, &l->timestamp);
         memcpy(ptr, l->cert, sizeof(l->cert));
@@ -159,7 +159,7 @@ unserialize_variables(uint8_t *buf, size_t count)
             free(l);
             return false;
         }
-        unserialize_guid(&buf, l->guid);
+        unserialize_guid(&buf, &l->guid);
         l->attributes = unserialize_uint32(&buf);
         unserialize_timestamp(&buf, &l->timestamp);
         memcpy(buf, l->cert, sizeof(l->cert));

@@ -23,7 +23,7 @@ struct efi_variable {
     UINTN name_len;
     uint8_t *data;
     UINTN data_len;
-    char guid[GUID_LEN];
+    EFI_GUID guid;
     UINT32 attributes;
     EFI_TIME timestamp;
     uint8_t cert[SHA256_DIGEST_SIZE];

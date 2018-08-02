@@ -1,6 +1,7 @@
 TARGET = varstored
 
 OBJS :=	device.o \
+	guid.o \
 	handler.o \
 	pci.o \
 	varstored.o \
@@ -39,8 +40,8 @@ $(TARGET): $(LIBS) $(OBJS)
 %.o: %.c
 	gcc -o $@ $(CFLAGS) -c $<
 
-check: testPK.pem testPK.key testPK2.pem testPK2.key
-	gcc -Wall -g -o test test.c $$(pkg-config --cflags --libs glib-2.0) -lcrypto
+check: testPK.pem testPK.key testPK2.pem testPK2.key guid.o
+	gcc -Wall -g -o test test.c guid.o $$(pkg-config --cflags --libs glib-2.0) -lcrypto
 	./test
 
 .PHONY: check
@@ -50,8 +51,8 @@ auth: $(AUTHS)
 
 .PHONY: auth
 
-create-auth: create-auth.c
-	gcc -Wall -o create-auth create-auth.c -lcrypto
+create-auth: create-auth.c guid.o
+	gcc -Wall -o create-auth create-auth.c guid.o -lcrypto
 
 %.pem %.key:
 	openssl req -new -x509 -newkey rsa:2048 -subj "/CN=$*/" -keyout $*.key -out $*.pem -days 36500 -nodes -sha256

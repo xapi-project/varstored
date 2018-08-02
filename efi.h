@@ -110,6 +110,10 @@ typedef struct __attribute__((packed)) {
 } EFI_TIME;
 
 typedef struct __attribute__((packed)) {
+    char data[GUID_LEN];
+} EFI_GUID;
+
+typedef struct __attribute__((packed)) {
     UINT32 dwLength;
     UINT16 wRevision;
     UINT16 wCertificateType;
@@ -117,7 +121,7 @@ typedef struct __attribute__((packed)) {
 
 typedef struct __attribute__((packed)) {
     WIN_CERTIFICATE Hdr;
-    char CertType[GUID_LEN];
+    EFI_GUID CertType;
     UINT8 CertData[1];
 } WIN_CERTIFICATE_UEFI_GUID;
 
@@ -127,10 +131,6 @@ typedef struct __attribute__((packed)) {
 } EFI_VARIABLE_AUTHENTICATION_2;
 
 #define WIN_CERT_TYPE_EFI_GUID         0x0EF1
-
-typedef struct __attribute__((packed)) {
-    char data[GUID_LEN];
-} EFI_GUID;
 
 typedef struct __attribute__((packed)) {
     EFI_GUID SignatureOwner;
@@ -147,7 +147,7 @@ typedef struct __attribute__((packed)) {
 } EFI_SIGNATURE_LIST;
 
 typedef struct __attribute__((packed)) {
-    char SigType[GUID_LEN];
+    EFI_GUID SigType;
     UINT32 SigHeaderSize;
     UINT32 SigDataSize;
 } EFI_SIGNATURE_ITEM;

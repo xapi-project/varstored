@@ -32,7 +32,7 @@ serialize_result(uint8_t **ptr, EFI_STATUS status)
 }
 
 static inline void
-serialize_guid(uint8_t **ptr, const char *guid)
+serialize_guid(uint8_t **ptr, const EFI_GUID *guid)
 {
     memcpy(*ptr, guid, GUID_LEN);
     *ptr += GUID_LEN;
@@ -88,7 +88,7 @@ unserialize_data(uint8_t **ptr, UINTN *len, UINTN limit)
 }
 
 static inline void
-unserialize_guid(uint8_t **ptr, char *guid)
+unserialize_guid(uint8_t **ptr, EFI_GUID *guid)
 {
     memcpy(guid, *ptr, GUID_LEN);
     *ptr += GUID_LEN;
