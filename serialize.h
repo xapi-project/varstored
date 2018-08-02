@@ -1,6 +1,9 @@
 #ifndef SERIALIZE_H
 #define SERIALIZE_H
 
+#include <stdint.h>
+#include <string.h>
+
 #include "efi.h"
 #include "handler.h"
 
