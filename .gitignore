@@ -4,7 +4,9 @@ varstored
 test
 test.dat
 create-auth
-*.auth
+PK.auth
+KEK.auth
+db.auth
 *.key
 PK.pem
 testPK.pem

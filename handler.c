@@ -1643,12 +1643,17 @@ setup_variables(void)
 }
 
 static bool
-set_variable_from_auth(uint8_t *name, UINTN name_len, EFI_GUID *guid, char *path)
+set_variable_from_auth(uint8_t *name, UINTN name_len, EFI_GUID *guid,
+                       char *path, bool append)
 {
     uint8_t buf[SHMEM_SIZE];
     uint8_t *ptr, *data;
     struct stat st;
     FILE *f;
+    UINT32 attr = ATTR_BRNV_TIME;
+
+    if (append)
+        attr |= EFI_VARIABLE_APPEND_WRITE;
 
     f = fopen(path, "r");
     if (!f) {
@@ -1681,7 +1686,7 @@ set_variable_from_auth(uint8_t *name, UINTN name_len, EFI_GUID *guid, char *path
     serialize_guid(&ptr, guid);
     serialize_data(&ptr, data, st.st_size);
     free(data);
-    serialize_uint32(&ptr, ATTR_BRNV | EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS);
+    serialize_uint32(&ptr, attr);
     *ptr = 0; /* at_runtime */
     dispatch_command(buf);
 
@@ -1702,21 +1707,28 @@ setup_keys(void)
     ret = set_variable_from_auth(EFI_PLATFORM_KEY_NAME,
                                  sizeof(EFI_PLATFORM_KEY_NAME),
                                  &gEfiGlobalVariableGuid,
-                                 AUTH_PATH_PREFIX "/PK.auth");
+                                 AUTH_PATH_PREFIX "/PK.auth", false);
     if (!ret)
         return false;
 
     ret = set_variable_from_auth(EFI_KEY_EXCHANGE_KEY_NAME,
                                  sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
                                  &gEfiGlobalVariableGuid,
-                                 AUTH_PATH_PREFIX "/KEK.auth");
+                                 AUTH_PATH_PREFIX "/KEK.auth", false);
     if (!ret)
         return false;
 
     ret = set_variable_from_auth(EFI_IMAGE_SECURITY_DATABASE,
                                  sizeof(EFI_IMAGE_SECURITY_DATABASE),
                                  &gEfiImageSecurityDatabaseGuid,
-                                 AUTH_PATH_PREFIX "/db.auth");
+                                 AUTH_PATH_PREFIX "/db.auth", false);
+    if (!ret)
+        return false;
+
+    ret = set_variable_from_auth(EFI_IMAGE_SECURITY_DATABASE1,
+                                 sizeof(EFI_IMAGE_SECURITY_DATABASE1),
+                                 &gEfiImageSecurityDatabaseGuid,
+                                 AUTH_PATH_PREFIX "/dbx.auth", true);
 
     return ret;
 }
