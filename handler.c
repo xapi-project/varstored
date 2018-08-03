@@ -1330,7 +1330,7 @@ do_set_variable(uint8_t *comm_buf)
                             ((name_len == sizeof(EFI_IMAGE_SECURITY_DATABASE) &&
                               !memcmp(name, EFI_IMAGE_SECURITY_DATABASE, name_len)) ||
                              (name_len == sizeof(EFI_IMAGE_SECURITY_DATABASE1) &&
-                              !memcmp(name, EFI_IMAGE_SECURITY_DATABASE2, name_len)) ||
+                              !memcmp(name, EFI_IMAGE_SECURITY_DATABASE1, name_len)) ||
                              (name_len == sizeof(EFI_IMAGE_SECURITY_DATABASE2) &&
                               !memcmp(name, EFI_IMAGE_SECURITY_DATABASE2, name_len)))) {
                         status = filter_signature_list(l->data, l->data_len, data, &data_len);
