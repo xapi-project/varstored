@@ -440,3 +440,16 @@ pci_config_dump(void)
                 pci.config[i ]);
     }
 }
+
+const uint8_t *
+pci_config_ptr(void)
+{
+    return pci.config;
+}
+
+void
+pci_config_resume(const uint8_t *data)
+{
+    memcpy(pci.config, data, PCI_CONFIG_SIZE);
+    pci_update_config();
+}

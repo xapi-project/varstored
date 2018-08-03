@@ -19,6 +19,7 @@
 #include "efi.h"
 #include "handler.h"
 #include "option.h"
+#include "pci.h"
 #include "serialize.h"
 
 #define DB_MAGIC "VARS"
@@ -134,7 +135,7 @@ serialize_variables(uint8_t **out, bool only_nv)
 }
 
 static bool
-unserialize_variables(uint8_t *buf, size_t count)
+unserialize_variables(uint8_t **buf, size_t count)
 {
     struct efi_variable *l;
     size_t i;
@@ -146,24 +147,24 @@ unserialize_variables(uint8_t *buf, size_t count)
             return false;
         }
 
-        l->name = unserialize_data(&buf, &l->name_len, NAME_LIMIT);
+        l->name = unserialize_data(buf, &l->name_len, NAME_LIMIT);
         if (!l->name) {
             DBG("Failed to allocate memory\n");
             free(l);
             return false;
         }
-        l->data = unserialize_data(&buf, &l->data_len, DATA_LIMIT);
+        l->data = unserialize_data(buf, &l->data_len, DATA_LIMIT);
         if (!l->data) {
             DBG("Failed to allocate memory\n");
             free(l->name);
             free(l);
             return false;
         }
-        unserialize_guid(&buf, &l->guid);
-        l->attributes = unserialize_uint32(&buf);
-        unserialize_timestamp(&buf, &l->timestamp);
+        unserialize_guid(buf, &l->guid);
+        l->attributes = unserialize_uint32(buf);
+        unserialize_timestamp(buf, &l->timestamp);
         memcpy(buf, l->cert, sizeof(l->cert));
-        buf += sizeof(l->cert);
+        *buf += sizeof(l->cert);
 
         l->next = var_list;
         var_list = l;
@@ -181,6 +182,7 @@ xapidb_init(void)
     uint8_t *buf, *ptr;
     uint32_t version;
     size_t count;
+    bool ret;
     int max_len, n, total = 0;
 
     if (!arg_init)
@@ -256,10 +258,10 @@ xapidb_init(void)
     count = unserialize_uintn(&ptr);
     unserialize_uintn(&ptr); /* data_len */
 
-    unserialize_variables(ptr, count);
+    ret = unserialize_variables(&ptr, count);
     free(buf);
 
-    return BACKEND_INIT_SUCCESS;
+    return ret ? BACKEND_INIT_SUCCESS : BACKEND_INIT_FAILURE;
 }
 
 static bool
@@ -287,9 +289,15 @@ xapidb_save(void)
         free(buf);
         return false;
     }
+    free(buf);
+
+    if (fwrite(pci_config_ptr(), 1, PCI_CONFIG_SIZE, f) != PCI_CONFIG_SIZE) {
+        DBG("Failed to write to '%s': %s\n", arg_save, strerror(errno));
+        fclose(f);
+        return false;
+    }
 
     fclose(f);
-    free(buf);
     return true;
 }
 
@@ -349,7 +357,12 @@ xapidb_resume(void)
 
     count = unserialize_uintn(&ptr);
     unserialize_uintn(&ptr); /* data_len */
-    unserialize_variables(ptr, count);
+    if (!unserialize_variables(&ptr, count)) {
+        free(buf);
+        return false;
+    }
+
+    pci_config_resume(ptr);
     free(buf);
 
     return true;

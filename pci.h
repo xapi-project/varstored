@@ -3,6 +3,8 @@
 #ifndef  _PCI_H
 #define  _PCI_H
 
+#include <xenctrl.h>
+
 #define PCI_NUM_BAR             6
 #define PCI_CONFIG_HEADER_SIZE  0x40
 #define PCI_CONFIG_SIZE         0x100
@@ -50,5 +52,7 @@ void            pci_bar_write(int is_mmio, uint64_t addr, uint64_t size, uint32_
 uint32_t        pci_config_read(uint64_t addr, uint64_t size);
 void            pci_config_write(uint64_t addr, uint64_t size, uint32_t val);
 void            pci_config_dump();
+const uint8_t * pci_config_ptr(void);
+void            pci_config_resume(const uint8_t *data);
 
 #endif  /* _PCI_H */
