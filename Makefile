@@ -17,7 +17,7 @@ CFLAGS += -DXC_WANT_COMPAT_MAP_FOREIGN_API=1 -DXC_WANT_COMPAT_EVTCHN_API=1 -DXC_
 
 CFLAGS += $$(pkg-config --cflags libxml-2.0)
 
-CFLAGS += -Wall -g -O1 
+CFLAGS += -Wall -g -O2
 
 ifeq ($(shell uname),Linux)
 LDLIBS := -lutil -lrt

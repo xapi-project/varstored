@@ -40,7 +40,8 @@ int
 pci_device_register(xc_interface *xch, domid_t domid, ioservid_t ioservid,
                     const pci_info_t *info)
 {
-    int     rc;
+    int rc;
+    uint16_t val;
 
     pci.xch = xch;
     pci.domid = domid;
@@ -53,24 +54,25 @@ pci_device_register(xc_interface *xch, domid_t domid, ioservid_t ioservid,
 
     pci.bdf = (info->bus << 8) | (info->device << 3) | (info->function);
 
-    *(uint16_t *)&pci.config[PCI_VENDOR_ID] = info->vendor_id;
-    *(uint16_t *)&pci.config[PCI_DEVICE_ID] = info->device_id;
+    memcpy(&pci.config[PCI_VENDOR_ID], &info->vendor_id, sizeof(info->vendor_id));
+    memcpy(&pci.config[PCI_DEVICE_ID], &info->device_id, sizeof(info->device_id));
     pci.config[PCI_REVISION_ID] = info->revision;
     pci.config[PCI_CLASS_PROG] = info->prog_if;
     pci.config[PCI_CLASS_DEVICE + 1] = info->class;
     pci.config[PCI_CLASS_DEVICE] = info->subclass;
     pci.config[PCI_HEADER_TYPE] = info->header_type;
-    *(uint16_t *)&pci.config[PCI_SUBSYSTEM_VENDOR_ID] = info->subvendor_id;
-    *(uint16_t *)&pci.config[PCI_SUBSYSTEM_ID] = info->subdevice_id;
-    *(uint16_t *)&pci.config[PCI_COMMAND] = info->command;
+    memcpy(&pci.config[PCI_SUBSYSTEM_VENDOR_ID], &info->subvendor_id, sizeof(info->subvendor_id));
+    memcpy(&pci.config[PCI_SUBSYSTEM_ID], &info->subdevice_id, sizeof(info->subdevice_id));
+    memcpy(&pci.config[PCI_COMMAND], &info->command, sizeof(info->command));
     pci.config[PCI_INTERRUPT_PIN] = info->interrupt_pin;
 
     pci.mask[PCI_CACHE_LINE_SIZE] = 0xff;
     pci.mask[PCI_INTERRUPT_LINE] = 0xff;
-    *(uint16_t *)&pci.mask[PCI_COMMAND] = PCI_COMMAND_IO |
-                                          PCI_COMMAND_MEMORY |
-                                          PCI_COMMAND_MASTER |
-                                          PCI_COMMAND_INTX_DISABLE;
+    val = PCI_COMMAND_IO |
+          PCI_COMMAND_MEMORY |
+          PCI_COMMAND_MASTER |
+          PCI_COMMAND_INTX_DISABLE;
+    memcpy(&pci.mask[PCI_COMMAND], &val, sizeof(val));
     memset(&pci.mask[PCI_CONFIG_HEADER_SIZE], 0xff,
            PCI_CONFIG_SIZE - PCI_CONFIG_HEADER_SIZE);
 
@@ -110,7 +112,8 @@ int
 pci_bar_register(unsigned int index, uint8_t type, unsigned int order,
                  const bar_ops_t *ops, void *priv)
 {
-    pci_bar_t   *bar;
+    pci_bar_t *bar;
+    uint32_t val;
 
     DBG("%d: %08x\n", index, 1u << order);
 
@@ -131,8 +134,10 @@ pci_bar_register(unsigned int index, uint8_t type, unsigned int order,
     bar->is_mmio = !(type & PCI_BASE_ADDRESS_SPACE_IO);
     bar->size = 1u << order;
 
-    *(uint32_t *)&pci.config[PCI_BASE_ADDRESS_0 + (index * 4)] = type;
-    *(uint32_t *)&pci.mask[PCI_BASE_ADDRESS_0 + (index * 4)] = ~(bar->size - 1);
+    val = type;
+    memcpy(&pci.config[PCI_BASE_ADDRESS_0 + (index * 4)], &val, sizeof(val));
+    val = ~(bar->size - 1);
+    memcpy(&pci.mask[PCI_BASE_ADDRESS_0 + (index * 4)], &val, sizeof(val));
 
     bar->enable = 1;
     bar->addr = PCI_BAR_UNMAPPED;
@@ -327,9 +332,11 @@ static void
 pci_update_bar(unsigned int index)
 {
     pci_bar_t *bar = &pci.bar[index];
-    uint32_t addr = *(uint32_t *)&pci.config[PCI_BASE_ADDRESS_0 + (index * 4)];
-    uint16_t cmd = *(uint16_t *)&pci.config[PCI_COMMAND];
-    uint32_t mask = ~(bar->size - 1);
+    uint16_t cmd;
+    uint32_t addr, mask = ~(bar->size - 1);
+
+    memcpy(&addr, &pci.config[PCI_BASE_ADDRESS_0 + (index * 4)], sizeof(addr));
+    memcpy(&cmd, &pci.config[PCI_COMMAND], sizeof(cmd));
 
     if (!bar->enable)
         return;
