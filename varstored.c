@@ -50,6 +50,7 @@ enum {
     VARSTORED_OPT_FUNCTION,
     VARSTORED_OPT_RESUME,
     VARSTORED_OPT_NONPERSISTENT,
+    VARSTORED_OPT_PIDFILE,
     VARSTORED_OPT_BACKEND,
     VARSTORED_OPT_ARG,
     VARSTORED_NR_OPTS
@@ -61,6 +62,7 @@ static struct option varstored_option[] = {
     {"function", 1, NULL, 0},
     {"resume", 0, NULL, 0},
     {"nonpersistent", 0, NULL, 0},
+    {"pidfile", 1, NULL, 0},
     {"backend", 1, NULL, 0},
     {"arg", 1, NULL, 0},
     {NULL, 0, NULL, 0}
@@ -72,6 +74,7 @@ static const char *varstored_option_text[] = {
     "<function>",
     NULL,
     NULL,
+    "<pidfile>",
     "<backend>",
     "<name>:<val>",
 };
@@ -183,6 +186,44 @@ xs_write_pid(struct xs_handle *xsh, domid_t domid)
     free(key);
     free(varstore_pid);
     return ret;
+}
+
+static bool
+create_pidfile(const char *path)
+{
+    int fd, len;
+    char *pid;
+
+    fd = open(path, O_WRONLY | O_TRUNC | O_CREAT | O_CLOEXEC, 0600);
+    if (fd == -1) {
+        ERR("Could not open pidfile '%s': %d, %s\n",
+            path, errno, strerror(errno));
+        return false;
+    }
+
+    if (lockf(fd, F_TLOCK, 0) == -1) {
+        ERR("Failed to lock pidfile\n");
+        close(fd);
+        return false;
+    }
+
+    len = asprintf(&pid, "%u\n", getpid());
+    if (len == -1) {
+        ERR("Out of memory\n");
+        close(fd);
+        return false;
+    }
+
+    if (write(fd, pid, len) != len) {
+        ERR("Failed to write to pidfile\n");
+        free(pid);
+        close(fd);
+        return false;
+    }
+    free(pid);
+
+    /* Leave pid file open and locked. */
+    return true;
 }
 
 static void
@@ -880,6 +921,11 @@ main(int argc, char **argv, char **envp)
 
         case VARSTORED_OPT_NONPERSISTENT:
             persistent = false;
+            break;
+
+        case VARSTORED_OPT_PIDFILE:
+            if (!create_pidfile(optarg))
+                exit(1);
             break;
 
         case VARSTORED_OPT_BACKEND:
