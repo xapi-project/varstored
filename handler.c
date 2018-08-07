@@ -65,6 +65,7 @@ uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
 struct efi_variable *var_list;
 bool secure_boot_enable;
 bool auth_enforce = true;
+bool persistent = true;
 
 static uint64_t
 get_space_usage(void)
@@ -1386,7 +1387,7 @@ do_set_variable(uint8_t *comm_buf)
             }
             free(name);
             serialize_result(&ptr, EFI_SUCCESS);
-            if (should_save)
+            if (should_save && persistent)
                 db->set_variable();
             return;
         }
@@ -1453,7 +1454,7 @@ do_set_variable(uint8_t *comm_buf)
         l->next = var_list;
         var_list = l;
         serialize_result(&ptr, EFI_SUCCESS);
-        if ((attr & EFI_VARIABLE_NON_VOLATILE))
+        if ((attr & EFI_VARIABLE_NON_VOLATILE) && persistent)
             db->set_variable();
     }
 

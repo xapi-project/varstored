@@ -40,5 +40,6 @@ bool setup_keys(void);
 
 extern bool secure_boot_enable;
 extern bool auth_enforce;
+extern bool persistent;
 
 #endif

@@ -49,6 +49,7 @@ enum {
     VARSTORED_OPT_DEVICE,
     VARSTORED_OPT_FUNCTION,
     VARSTORED_OPT_RESUME,
+    VARSTORED_OPT_NONPERSISTENT,
     VARSTORED_OPT_BACKEND,
     VARSTORED_OPT_ARG,
     VARSTORED_NR_OPTS
@@ -59,6 +60,7 @@ static struct option varstored_option[] = {
     {"device", 1, NULL, 0},
     {"function", 1, NULL, 0},
     {"resume", 0, NULL, 0},
+    {"nonpersistent", 0, NULL, 0},
     {"backend", 1, NULL, 0},
     {"arg", 1, NULL, 0},
     {NULL, 0, NULL, 0}
@@ -68,6 +70,7 @@ static const char *varstored_option_text[] = {
     "<domid>",
     "<device>",
     "<function>",
+    NULL,
     NULL,
     "<backend>",
     "<name>:<val>",
@@ -873,6 +876,10 @@ main(int argc, char **argv, char **envp)
 
         case VARSTORED_OPT_RESUME:
             opt_resume = true;
+            break;
+
+        case VARSTORED_OPT_NONPERSISTENT:
+            persistent = false;
             break;
 
         case VARSTORED_OPT_BACKEND:
