@@ -22,9 +22,7 @@ static char *arg_save;
 static bool
 xapidb_parse_arg(const char *name, const char *val)
 {
-    if (!strcmp(name, "init"))
-        xapidb_arg_init = strdup(val);
-    else if (!strcmp(name, "resume"))
+    if (!strcmp(name, "resume"))
         arg_resume = strdup(val);
     else if (!strcmp(name, "save"))
         arg_save = strdup(val);
@@ -39,8 +37,8 @@ xapidb_parse_arg(const char *name, const char *val)
 static bool
 xapidb_check_args(void)
 {
-    if (opt_resume && xapidb_arg_init) {
-        fprintf(stderr, "Backend arg 'init' is invalid when resuming\n");
+    if (!xapidb_arg_uuid) {
+        fprintf(stderr, "Backend arg 'uuid' is required\n");
         return false;
     }
     if (!opt_resume && arg_resume) {
@@ -140,7 +138,7 @@ xapidb_resume(void)
 struct backend xapidb = {
     .parse_arg = xapidb_parse_arg,
     .check_args = xapidb_check_args,
-    .init = xapidb_file_init,
+    .init = xapidb_init,
     .save = xapidb_save,
     .resume = xapidb_resume,
     .set_variable = xapidb_set_variable,
