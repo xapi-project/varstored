@@ -78,7 +78,7 @@ EFI_TIME test_timec = {2018, 6, 20, 13, 38, 3, 0, 0, 0, 0, 0};
 #define vsd_assert_cmpuint(_txt, _x, _y, _z, ...) \
     do { \
         if (!((_x) _y (_z))) \
-            printf("\nWhile checking " # _txt " assert failed: %lu " #_y \
+            printf("\nWhile checking "_txt " assert failed: %lu " #_y \
                    " %lu\n", ## __VA_ARGS__, (UINTN)(_x), (UINTN)(_z)); \
         g_assert_cmpuint(_x, _y, _z); \
     } while (0);
@@ -86,7 +86,7 @@ EFI_TIME test_timec = {2018, 6, 20, 13, 38, 3, 0, 0, 0, 0, 0};
 #define vsd_assert_nonnull(_txt, _x, ...) \
     do { \
         if ((_x) == NULL) \
-            printf("\nWhile checking " # _txt " assert non null failed.\n", \
+            printf("\nWhile checking " _txt " assert non null failed.\n", \
                    ## __VA_ARGS__); \
         g_assert_nonnull(_x); \
     } while (0);
@@ -112,8 +112,10 @@ static char *get_dstring_pretty(const dstring *s)
     for (i = 0; i < s->length; i++) {
         if (s->data[i] > 31 && s->data[i] < 128)
             *(pos++) = s->data[i];
-        else
-            sprintf(pos += 4, "{%02x}", s->data[i] && 0xff);
+        else {
+            sprintf(pos, "{%02x}", s->data[i] && 0xff);
+            pos += 4;
+        }
     }
     *pos = '\0';
     return str;
@@ -388,7 +390,7 @@ static void setup_ssl(void)
 }
 
 static void read_x509_into_CertList(char *certfile, EFI_SIGNATURE_LIST **ret_cert,
-                                    int *len)
+                                    size_t *len)
 {
     EFI_SIGNATURE_LIST *pk_cert;
     EFI_SIGNATURE_DATA *pk_cert_data;
@@ -496,6 +498,7 @@ static size_t sign(uint8_t **signed_buf, const dstring *varname,
     assert(bio);
     p7 = PKCS7_sign(NULL, NULL, NULL, bio, PKCS7_BINARY | PKCS7_PARTIAL |
                     PKCS7_DETACHED | PKCS7_NOATTR);
+    assert(p7);
     md = EVP_get_digestbyname(sd->digest);
     vsd_assert_nonnull("digest", md);
 
@@ -550,17 +553,20 @@ static void sign_and_check_(const dstring *varname, const EFI_GUID *vendor_guid,
 }
 
 #define sign_and_check(_name, _vend, _attr, _time, _data, _size, _sig, _e_d) \
-    sign_and_check_(_name, _vend, _attr, _time, _data, _size, _sig, _e_d, \
-                    __LINE__)
+    sign_and_check_(_name, _vend, _attr, _time, _data, _size, _sig, _e_d, __LINE__)
 
 /*
  * This function checks the variable's data is as expected.
  * The expected data is provided, such that it can be compared
  */
 
-static void check_variable_data(dstring *name, const EFI_GUID *guid,
+#define check_variable_data(_name, _guid, _avai, _runtime, _expected, _len) \
+    check_variable_data_(_name, _guid, _avai, _runtime, _expected, _len, __LINE__)
+
+static void check_variable_data_(dstring *name, const EFI_GUID *guid,
                                 UINTN avail, BOOLEAN at_runtime,
-                                const uint8_t *expected_data, UINTN expected_len)
+                                const uint8_t *expected_data,
+                                UINTN expected_len, int line)
 {
     uint8_t *ret_data;
     EFI_STATUS status;
@@ -569,12 +575,14 @@ static void check_variable_data(dstring *name, const EFI_GUID *guid,
     char *nice_name = get_dstring_pretty(name);
 
     status = call_get_variable_data(name, guid, avail, at_runtime, &ret_data, &len);
-    vsd_assert_status("get_variable(\"%s\")", status, ==, 0, nice_name);
-    vsd_assert_cmpuint("data length for \"%s\"", expected_len, ==, len,
-                       nice_name);
+    vsd_assert_status("get_variable(\"%s\") at %d", status, ==, 0,
+                       nice_name, line);
+    vsd_assert_cmpuint("data length for \"%s\" at %d", expected_len, ==, len,
+                       nice_name, line);
 
     cmp = memcmp(ret_data, expected_data, len);
-    vsd_assert_cmpuint("cmp of data for \"%s\"", cmp, ==, 0, nice_name);
+    vsd_assert_cmpuint("cmp of data for \"%s\" at %d", cmp, ==, 0,
+                       nice_name, line);
     free(nice_name);
 }
 
@@ -1628,7 +1636,7 @@ static void test_secure_set_variable_setupmode(void)
 static void test_secure_set_variable_usermode()
 {
     EFI_SIGNATURE_LIST *ret_cert;
-    int certlen;
+    size_t certlen;
 
     reset_vars();
     setup_variables();
@@ -1652,10 +1660,8 @@ static void test_secure_set_variable_usermode()
 
 static void test_secure_set_PK()
 {
-    int certlen;
-    EFI_SIGNATURE_LIST *ret_cert;
-    EFI_SIGNATURE_LIST *second_cert;
-    int secondcertlen;
+    EFI_SIGNATURE_LIST *ret_cert, *second_cert;
+    size_t certlen, secondcertlen;
 
     reset_vars();
     setup_variables();
@@ -1716,7 +1722,7 @@ static void test_secure_set_PK()
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
 
-    read_x509_into_CertList("testPK.pem", &second_cert, &secondcertlen);
+    read_x509_into_CertList("testPK2.pem", &second_cert, &secondcertlen);
 
     /* new cert, signed by self */
     sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
@@ -1729,7 +1735,7 @@ static void test_secure_set_PK()
 
     /* new cert, truncated */
     sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_timeb, (uint8_t *)&second_cert, secondcertlen - 8,
+                   &test_timeb, (uint8_t *)second_cert, secondcertlen - 8,
                    &sign_first_key, EFI_INVALID_PARAMETER);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
@@ -1745,9 +1751,17 @@ static void test_secure_set_PK()
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
 
-    /* delete it.... */
+    /* delete it, with first (should fail) */
     sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_timec, NULL, 0, &sign_first_key, EFI_SUCCESS);
+                   &test_timec, NULL, 0, &sign_first_key, EFI_SECURITY_VIOLATION);
+    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, (uint8_t *)"\0", 1);
+    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                        (uint8_t *)"\1", 1);
+
+    /* delete it, with second */
+    sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+                   &test_timec, NULL, 0, &sign_second_key, EFI_SUCCESS);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
