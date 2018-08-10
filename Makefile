@@ -54,7 +54,7 @@ tools: $(TOOLS)
 $(TOOLS): %: $(TOOLOBJS) %.o
 	gcc -o $@ $(LDFLAGS) $^ $(TOOLLIBS)
 
-check: testPK.pem testPK.key testPK2.pem testPK2.key guid.o
+check: testPK.pem testPK.key testPK2.pem testPK2.key testkey.pem guid.o
 	gcc -Wall -g -o test test.c guid.o -Iinclude $$(pkg-config --cflags --libs glib-2.0) -lcrypto
 	./test
 
