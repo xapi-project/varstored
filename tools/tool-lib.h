@@ -3,6 +3,8 @@
 
 #include <efi.h>
 
+#define GUID_STR_LEN (strlen("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"))
+
 bool tool_init(void);
 void print_efi_error(EFI_STATUS status);
 bool parse_guid(EFI_GUID *guid, const char *guid_str);

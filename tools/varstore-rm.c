@@ -5,6 +5,8 @@
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <errno.h>
 
 #include <backend.h>
 #include <debug.h>
@@ -13,13 +15,15 @@
 
 #include "tool-lib.h"
 
+#define CLONE_RM_DIR "/etc/xapi.d/efi-clone"
+
 struct backend *db = &xapidb_cmdline;
 enum log_level log_level = LOG_LVL_INFO;
 
 static void
 usage(const char *progname)
 {
-    printf("usage: %s [-h] <vm-uuid> <guid> <name>\n", progname);
+    printf("usage: %s [-c] [-h] <vm-uuid> [<guid> <name>]\n", progname);
 }
 
 static bool
@@ -91,22 +95,130 @@ do_rm(const char *guid_str, const char *name)
     return true;
 }
 
+static bool
+clone_rm_one_file(const char *path)
+{
+    FILE *f;
+    EFI_GUID guid;
+    /* GUID string length + maximum length of a name + some whitespace */
+    char line[GUID_STR_LEN + NAME_MAX + 16];
+    char *ptr, *end;
+
+    f = fopen(path, "r");
+    if (!f) {
+        fprintf(stderr, "Could not open '%s': %d, %s\n",
+                path, errno, strerror(errno));
+        return false;
+    }
+
+    while (fgets(line, sizeof(line), f)) {
+        /* Strip newline */
+        ptr = line + strlen(line) - 1;
+        while (ptr >= line && (*ptr == '\r' || *ptr == '\n'))
+            *ptr-- = '\0';
+
+        /* Ignore comments and blank lines */
+        if (strlen(line) == 0)
+            continue;
+        if (*line == '#')
+            continue;
+
+        /* Split GUID and name separated by some whitespace */
+        end = line + strlen(line);
+        ptr = line + GUID_STR_LEN;
+        while (ptr < end) {
+            if (isblank(*ptr))
+                *ptr++ = '\0';
+            else
+                break;
+        }
+
+        if (ptr >= end || !parse_guid(&guid, line)) {
+            fprintf(stderr, "Invalid format\n");
+            fclose(f);
+            return false;
+        } else {
+            printf("Removing: GUID: '%s' Name: '%s'\n", line, ptr);
+            do_rm(line, ptr);
+        }
+    }
+    fclose(f);
+
+    return true;
+}
+
+static bool
+do_clone_rm(void)
+{
+    DIR *dir;
+    struct dirent *d;
+    char path[PATH_MAX];
+    bool ret = true;
+
+    dir = opendir(CLONE_RM_DIR);
+    if (!dir)
+        return true;
+
+    for (;;) {
+        d = readdir(dir);
+
+        if (!d)
+            break;
+        if (!strcmp(d->d_name, ".") || !strcmp(d->d_name, ".."))
+            continue;
+
+        if (snprintf(path, sizeof(path),
+                     CLONE_RM_DIR "/%s", d->d_name) >= sizeof(path)) {
+            fprintf(stderr, "Path too long\n");
+            ret = false;
+            goto out;
+        }
+
+        ret = clone_rm_one_file(path);
+        if (!ret)
+            goto out;
+    }
+
+out:
+    closedir(dir);
+    return ret;
+}
+
 int main(int argc, char **argv)
 {
-    if (argc != 4) {
+    bool clone_rm = false;
+
+    for (;;) {
+        int c = getopt(argc, argv, "ch");
+
+        if (c == -1)
+            break;
+
+        switch (c) {
+        case 'c':
+            clone_rm = true;
+            break;
+        case 'h':
+            usage(argv[0]);
+            exit(0);
+        default:
+            usage(argv[0]);
+            exit(1);
+        }
+    }
+
+    if ((clone_rm && argc - optind != 1) || (!clone_rm && argc - optind != 3)) {
         usage(argv[0]);
         exit(1);
     }
 
-    if (!strcmp(argv[1], "-h")) {
-        usage(argv[0]);
-        exit(0);
-    }
-
-    db->parse_arg("uuid", argv[1]);
+    db->parse_arg("uuid", argv[optind]);
 
     if (!tool_init())
         exit(1);
 
-    return !do_rm(argv[2], argv[3]);
+    if (clone_rm)
+        return !do_clone_rm();
+    else
+        return !do_rm(argv[optind + 1], argv[optind + 2]);
 }

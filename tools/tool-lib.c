@@ -191,7 +191,7 @@ parse_guid(EFI_GUID *guid, const char *guid_str)
     int i;
 
     len = strlen(guid_str);
-    if (len != strlen("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"))
+    if (len != GUID_STR_LEN)
         return false;
 
     for (i = 0; i < len; i++) {
