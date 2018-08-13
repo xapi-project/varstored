@@ -1207,6 +1207,50 @@ filter_signature_list(uint8_t *data, UINTN data_len,
     return EFI_SUCCESS;
 }
 
+static struct efi_variable *
+copy_efi_variable(struct efi_variable *efi_var)
+{
+    struct efi_variable *new_efi_var;
+
+    if (efi_var == NULL)
+        return NULL;
+
+    new_efi_var = malloc(sizeof *new_efi_var);
+    if (!new_efi_var)
+        return NULL;
+
+    *new_efi_var = *efi_var;
+    new_efi_var->next = NULL;
+
+    new_efi_var->name = malloc(efi_var->name_len);
+    if (!new_efi_var->name) {
+        free(new_efi_var);
+        return NULL;
+    }
+    memcpy(new_efi_var->name, efi_var->name, efi_var->name_len);
+
+    new_efi_var->data = malloc(efi_var->data_len);
+    if (!new_efi_var->data) {
+        free(new_efi_var->name);
+        free(new_efi_var);
+        return NULL;
+    }
+    memcpy(new_efi_var->data, efi_var->data, efi_var->data_len);
+
+    return new_efi_var;
+}
+
+static void
+free_efi_variable(struct efi_variable *efi_var)
+{
+    if (efi_var == NULL)
+        return;
+
+    free(efi_var->name);
+    free(efi_var->data);
+    free(efi_var);
+}
+
 static void
 do_set_variable(uint8_t *comm_buf)
 {
@@ -1278,6 +1322,7 @@ do_set_variable(uint8_t *comm_buf)
         if (l->name_len == name_len &&
                 !memcmp(l->name, name, name_len) &&
                 !memcmp(&l->guid, &guid, GUID_LEN)) {
+            struct efi_variable *rollback_var = NULL;
             bool should_save = !!(l->attributes & EFI_VARIABLE_NON_VOLATILE);
 
             /* Only runtime variables can be updated/deleted at runtime. */
@@ -1330,9 +1375,7 @@ do_set_variable(uint8_t *comm_buf)
                     prev->next = l->next;
                 else
                     var_list = l->next;
-                free(l->name);
-                free(l->data);
-                free(l);
+                rollback_var = l;
                 free(data);
             } else {
                 if (l->attributes != attr) {
@@ -1361,9 +1404,17 @@ do_set_variable(uint8_t *comm_buf)
                         serialize_result(&ptr, EFI_OUT_OF_RESOURCES);
                         goto err;
                     }
+
+                    rollback_var = copy_efi_variable(l);
+                    if (!rollback_var) {
+                        serialize_result(&ptr, EFI_OUT_OF_RESOURCES);
+                        goto err;
+                    }
+
                     new_data = realloc(l->data, l->data_len + data_len);
                     if (!new_data) {
                         serialize_result(&ptr, EFI_DEVICE_ERROR);
+                        free_efi_variable(rollback_var);
                         goto err;
                     }
                     if ((attr & EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS) &&
@@ -1378,6 +1429,13 @@ do_set_variable(uint8_t *comm_buf)
                         serialize_result(&ptr, EFI_OUT_OF_RESOURCES);
                         goto err;
                     }
+
+                    rollback_var = copy_efi_variable(l);
+                    if (!rollback_var) {
+                        serialize_result(&ptr, EFI_OUT_OF_RESOURCES);
+                        goto err;
+                    }
+
                     if (attr & EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS)
                         l->timestamp = timestamp;
                     free(l->data);
@@ -1386,9 +1444,24 @@ do_set_variable(uint8_t *comm_buf)
                 }
             }
             free(name);
+            if (should_save && persistent) {
+                if (!db->set_variable()) {
+                    /* efivar delete and append/update case */
+                    rollback_var->next = l->next;
+                    if (prev)
+                        prev->next = rollback_var;
+                    else
+                        var_list = rollback_var;
+
+                    /* Free the changed var in the append/update case */
+                    if (rollback_var != l)
+                        free_efi_variable(l);
+                    serialize_result(&ptr, EFI_DEVICE_ERROR);
+                    return;
+                }
+            }
+            free_efi_variable(rollback_var);
             serialize_result(&ptr, EFI_SUCCESS);
-            if (should_save && persistent)
-                db->set_variable();
             return;
         }
         prev = l;
@@ -1453,9 +1526,17 @@ do_set_variable(uint8_t *comm_buf)
         }
         l->next = var_list;
         var_list = l;
+        if ((attr & EFI_VARIABLE_NON_VOLATILE) && persistent) {
+            if (!db->set_variable()) {
+                /* remove var inserted to head */
+                var_list = l->next;
+
+                free_efi_variable(l);
+                serialize_result(&ptr, EFI_DEVICE_ERROR);
+                return;
+            }
+        }
         serialize_result(&ptr, EFI_SUCCESS);
-        if ((attr & EFI_VARIABLE_NON_VOLATILE) && persistent)
-            db->set_variable();
     }
 
     return;
