@@ -54,7 +54,7 @@ tools: $(TOOLS)
 $(TOOLS): %: $(TOOLOBJS) %.o
 	gcc -o $@ $(LDFLAGS) $^ $(TOOLLIBS)
 
-check: testPK.pem testPK.key testPK2.pem testPK2.key testkey.pem guid.o
+check: testPK.pem testPK.key testPK2.pem testPK2.key testKey.pem guid.o
 	gcc -Wall -g -o test test.c guid.o -Iinclude $$(pkg-config --cflags --libs glib-2.0) -lcrypto
 	./test
 
@@ -86,7 +86,7 @@ clean:
 	rm -f $(DEPS)
 	rm -f $(TARGET)
 	rm -f TAGS
-	rm -f test test.dat testPK.pem testPK.key testPK2.pem testPK2.key
+	rm -f test test.dat testPK.pem testPK.key testPK2.pem testPK2.key testKey.pem testKey.key
 	rm -f $(AUTHS)
 	rm -f create-auth
 	rm -f PK.pem PK.key
