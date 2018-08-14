@@ -269,6 +269,7 @@ X509_get_tbs_cert(X509 *cert, uint8_t **tbs_cert, UINTN *tbs_len)
         return EFI_DEVICE_ERROR;
     }
     memcpy(*tbs_cert, tbs_ptr, *tbs_len);
+    free(buf);
 
     return EFI_SUCCESS;
 }
@@ -514,8 +515,9 @@ out:
  * Get the signer's certificates from PKCS#7 signed data.
  * Adapted from edk2.
  *
- * The caller is responsible for free the pkcs7 context. certs should not be
- * used after the context is freed.
+ * The caller is responsible for free the pkcs7 context and the stack of certs
+ * (but not the certs themselves). The certs should not be used after the
+ * context is freed.
  */
 static EFI_STATUS
 pkcs7_get_signers(const uint8_t *p7data, UINTN p7_len,
@@ -687,7 +689,7 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
     uint8_t *var_data = NULL;
     EFI_VARIABLE_AUTHENTICATION_2 *d;
     UINTN sig_len, verify_len, payload_len, var_len;
-    STACK_OF(X509) *certs;
+    STACK_OF(X509) *certs = NULL;
     X509 *top_level_cert;
     PKCS7 *pkcs7 = NULL;
     EFI_STATUS status;
@@ -931,6 +933,7 @@ out:
     free(var_data);
     free(tlc_buf);
     free(verify_buf);
+    sk_X509_free(certs);
     PKCS7_free(pkcs7);
     return status;
 }

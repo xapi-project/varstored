@@ -436,7 +436,7 @@ static void read_x509_list_into_CertList(char **certfile,
     pk_cert_len = sizeof(EFI_SIGNATURE_LIST) + num_certs *
                   (largest_cert_len + offsetof(EFI_SIGNATURE_DATA, SignatureData));
 
-    pk_cert = malloc(pk_cert_len);
+    pk_cert = calloc(1, pk_cert_len);
     vsd_assert_nonnull("malloc pk cert", pk_cert);
 
     /* certs all loaded, and memory allocated - now populate pk_cert */
@@ -460,6 +460,7 @@ static void read_x509_list_into_CertList(char **certfile,
         pk_cert_data->SignatureOwner = testOwnerGuid;
         pk_cert_data = (EFI_SIGNATURE_DATA *)((uint8_t *)pk_cert_data + pk_cert->SignatureSize);
 
+        X509_free(cert_list->cert);
         free(cert_list);
         cert_list = next;
     }
@@ -555,6 +556,8 @@ static size_t sign(uint8_t **signed_buf, const dstring *varname,
     PKCS7_final(p7, bio, PKCS7_BINARY | PKCS7_DETACHED | PKCS7_NOATTR);
     BIO_free(bio);
     free(request);
+    EVP_PKEY_free(pkey);
+    X509_free(cert);
 
     sig_size = i2d_PKCS7(p7, NULL);
     auth_size = offsetof(EFI_VARIABLE_AUTHENTICATION_2, AuthInfo.CertData) +
@@ -629,6 +632,7 @@ static void check_variable_data_(dstring *name, const EFI_GUID *guid,
     cmp = memcmp(ret_data, expected_data, len);
     vsd_assert_cmpuint("cmp of data for \"%s\" at %d", cmp, ==, 0,
                        nice_name, line);
+    free(ret_data);
     free(nice_name);
 }
 

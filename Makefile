@@ -54,11 +54,21 @@ tools: $(TOOLS)
 $(TOOLS): %: $(TOOLOBJS) %.o
 	gcc -o $@ $(LDFLAGS) $^ $(TOOLLIBS)
 
-check: testPK.pem testPK.key testPK2.pem testPK2.key testKey.pem guid.o
-	gcc -Wall -g -o test test.c guid.o -Iinclude $$(pkg-config --cflags --libs glib-2.0) -lcrypto
+test.o: test.c
+	gcc -o $@ $(CFLAGS) $$(pkg-config --cflags glib-2.0) -c $<
+
+test: test.o guid.o
+	gcc -o $@ $(LDFLAGS) $^ -lcrypto $$(pkg-config --libs glib-2.0)
+
+TESTDEPS := test testPK.pem testPK.key testPK2.pem testPK2.key testKey.pem guid.o
+
+check: $(TESTDEPS)
 	./test
 
-.PHONY: check
+valgrind-check: $(TESTDEPS)
+	valgrind --leak-check=full --track-origins=yes ./test
+
+.PHONY: check valgrind-check
 
 AUTHS = PK.auth KEK.auth db.auth
 auth: $(AUTHS)
@@ -86,7 +96,8 @@ clean:
 	rm -f $(DEPS)
 	rm -f $(TARGET)
 	rm -f TAGS
-	rm -f test test.dat testPK.pem testPK.key testPK2.pem testPK2.key testKey.pem testKey.key
+	rm -f test.o test test.dat
+	rm -f testPK.pem testPK.key testPK2.pem testPK2.key testKey.pem testKey.key
 	rm -f $(AUTHS)
 	rm -f create-auth
 	rm -f PK.pem PK.key
