@@ -845,13 +845,26 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
         EFI_SIGNATURE_DATA *cert;
         X509 *trusted_cert;
 
-        cert_list = (EFI_SIGNATURE_LIST *)payload;
-        cert = (EFI_SIGNATURE_DATA *)((uint8_t *)cert_list +
-               sizeof(EFI_SIGNATURE_LIST) + cert_list->SignatureHeaderSize);
-        if (cert_list->SignatureSize < EFI_SIG_DATA_SIZE) {
+        if (payload_len == 0) {
+            /* There is no payload therefore the variable will be deleted. */
+            *payload_len_out = payload_len;
+            *payload_out = NULL;
+            status = EFI_SUCCESS;
+            goto out;
+        } else if (payload_len < sizeof(*cert_list)) {
             status = EFI_SECURITY_VIOLATION;
             goto out;
         }
+
+        cert_list = (EFI_SIGNATURE_LIST *)payload;
+        if (payload_len < (sizeof(*cert_list) + cert_list->SignatureHeaderSize +
+                           cert_list->SignatureSize) ||
+                cert_list->SignatureSize < EFI_SIG_DATA_SIZE) {
+            status = EFI_SECURITY_VIOLATION;
+            goto out;
+        }
+        cert = (EFI_SIGNATURE_DATA *)((uint8_t *)cert_list +
+               sizeof(EFI_SIGNATURE_LIST) + cert_list->SignatureHeaderSize);
         trusted_cert = X509_from_buf(cert->SignatureData,
                                      cert_list->SignatureSize - EFI_SIG_DATA_SIZE);
         if (!trusted_cert) {
@@ -1500,6 +1513,12 @@ do_set_variable(uint8_t *comm_buf)
             free(data);
             data = payload;
             data_len = payload_len;
+        }
+
+        if (data_len == 0) {
+            free(data);
+            serialize_result(&ptr, EFI_NOT_FOUND);
+            goto err;
         }
 
         if (get_space_usage() + name_len + data_len +

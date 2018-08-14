@@ -1856,12 +1856,9 @@ static void test_secure_set_PK()
                         BSIZ, 0, (uint8_t *)"\1", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
-    /*
-     * TODO: This test fails.  Tried to delete it again....
-     *
-     * sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-     *                &test_timeb, NULL, 0, &sign_first_key, EFI_NOT_FOUND);
-     */
+    sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+                   &test_timeb, NULL, 0, &sign_first_key, EFI_NOT_FOUND);
+
     free(first_cert);
     free(second_cert);
 }
