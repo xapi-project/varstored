@@ -1699,7 +1699,7 @@ setup_variables(void)
 {
     EFI_STATUS status;
     UINTN data_len;
-    uint8_t setup_mode;
+    uint8_t setup_mode = 0;
     uint8_t *data;
     uint8_t secure_boot = 0, deployed_mode = 0, audit_mode = 0;
 
