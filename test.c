@@ -1996,7 +1996,7 @@ static void test_secure_set_KEK_usermode()
     size_t pk_len, first_len, pk2_len, combined_len;
 
     char *cert_list[3] = { "testPK2.pem", "testKey.pem", NULL };
-    uint8_t *cert_data, *first_data;
+    uint8_t *cert_data, *first_data, *second_data;
     uint8_t temp;
 
     EFI_TIME test_time = {2018, 6, 20, 13, 38, 0, 0, 0, 0, 0, 0};
@@ -2074,24 +2074,22 @@ static void test_secure_set_KEK_usermode()
     /*
      * Corrupt Second Cert
      *
-     * TODO: This fails.
-     *
-     * second_data = cert_data + combined_cert->SignatureSize +
-     *               offsetof(EFI_SIGNATURE_DATA, SignatureData);
-     * temp = *second_data;
-     * *second_data = -1;
-     *
-     * sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
-     *                ATTR_BRNV_TIME,
-     *                &test_time, (uint8_t *)combined_cert, combined_len,
-     *                &sign_first_key, EFI_INVALID_PARAMETER);
-     * *second_data = temp;
      */
+    second_data = cert_data + combined_cert->SignatureSize +
+                  offsetof(EFI_SIGNATURE_DATA, SignatureData);
+    temp = *second_data;
+    *second_data = -1;
 
     sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
                    ATTR_BRNV_TIME,
                    &test_time, (uint8_t *)combined_cert, combined_len,
-                   &sign_first_key, EFI_SUCCESS);
+                   &sign_first_key, EFI_INVALID_PARAMETER);
+    *second_data = temp;
+
+    sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
+                  ATTR_BRNV_TIME,
+                  &test_time, (uint8_t *)combined_cert, combined_len,
+                  &sign_first_key, EFI_SUCCESS);
 
     free(combined_cert);
     free(pk_cert);

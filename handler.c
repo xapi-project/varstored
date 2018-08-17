@@ -43,6 +43,8 @@ EFI_SIGNATURE_ITEM mSupportSigItem[] = {
     {{{0x63, 0xbf, 0x6d, 0x44, 0x02, 0x25, 0xda, 0x4c, 0xbc, 0xfa, 0x24, 0x65, 0xd2, 0xb0, 0xfe, 0x9d}}, 0, 80           } /* EFI_CERT_X509_SHA512_GUID */
 };
 
+#define NUM_OF_SUPPORTED_SIG_ITEMS    (sizeof(mSupportSigItem) / sizeof(EFI_SIGNATURE_ITEM))
+
 uint8_t EFI_SETUP_MODE_NAME[] = {'S',0,'e',0,'t',0,'u',0,'p',0,'M',0,'o',0,'d',0,'e',0};
 uint8_t EFI_AUDIT_MODE_NAME[] = {'A',0,'u',0,'d',0,'i',0,'t',0,'M',0,'o',0,'d',0,'e',0};
 uint8_t EFI_DEPLOYED_MODE_NAME[] = {'D',0,'e',0,'p',0,'l',0,'o',0,'y',0,'e',0,'d',0,'M',0,'o',0,'d',0,'e',0};
@@ -591,8 +593,9 @@ check_signature_list_format(uint8_t *name, UINTN name_len,
 {
     EFI_SIGNATURE_LIST *sig_list;
     int count;
-    UINTN remaining;
+    UINTN remaining, list_items;
     int i;
+    size_t list_body_size;
 
     if (data_len == 0)
         return EFI_SUCCESS;
@@ -602,7 +605,7 @@ check_signature_list_format(uint8_t *name, UINTN name_len,
     remaining = data_len;
 
     while ((remaining > 0) && (remaining >= sig_list->SignatureListSize)) {
-        for (i = 0; i < (sizeof(mSupportSigItem) / sizeof(EFI_SIGNATURE_ITEM)); i++ ) {
+        for (i = 0; i < NUM_OF_SUPPORTED_SIG_ITEMS; i++) {
             if (!memcmp(&sig_list->SignatureType, &mSupportSigItem[i].SigType,
                         GUID_LEN)) {
                 if (mSupportSigItem[i].SigDataSize != (UINT32)~0 &&
@@ -615,45 +618,53 @@ check_signature_list_format(uint8_t *name, UINTN name_len,
             }
         }
 
-        if (i == (sizeof (mSupportSigItem) / sizeof (EFI_SIGNATURE_ITEM)))
+        if (i == NUM_OF_SUPPORTED_SIG_ITEMS)
             return EFI_INVALID_PARAMETER;
 
+        list_body_size = sig_list->SignatureListSize - sizeof(EFI_SIGNATURE_LIST) -
+                         sig_list->SignatureHeaderSize;
+
+        if (list_body_size % sig_list->SignatureSize != 0)
+            return EFI_INVALID_PARAMETER;
+
+        list_items = list_body_size / sig_list->SignatureSize;
+
         if (!memcmp(&sig_list->SignatureType, &gEfiCertX509Guid, GUID_LEN)) {
-            EFI_SIGNATURE_DATA *cert_data;
             UINTN cert_len;
             X509 *cert;
             EVP_PKEY *pkey;
             RSA *ctx;
             bool fail;
+            EFI_SIGNATURE_DATA *cert_data =
+                    (EFI_SIGNATURE_DATA *)((uint8_t *)sig_list +
+                    sizeof(EFI_SIGNATURE_LIST) + sig_list->SignatureHeaderSize);
+            void *end = (void *)cert_data + sig_list->SignatureSize * list_items;
 
-            cert_data = (EFI_SIGNATURE_DATA *)((uint8_t *)sig_list +
-                sizeof(EFI_SIGNATURE_LIST) + sig_list->SignatureHeaderSize);
             if (sig_list->SignatureSize < EFI_SIG_DATA_SIZE)
                 return EFI_INVALID_PARAMETER;
             cert_len = sig_list->SignatureSize - EFI_SIG_DATA_SIZE;
-            cert = X509_from_buf(cert_data->SignatureData, cert_len);
-            if (!cert)
-                return EFI_INVALID_PARAMETER;
-            pkey = X509_get_pubkey(cert);
-            if (!pkey || EVP_PKEY_id(pkey) != EVP_PKEY_RSA) {
+
+            while (cert_data != end) {
+                cert = X509_from_buf(cert_data->SignatureData, cert_len);
+                if (!cert)
+                    return EFI_INVALID_PARAMETER;
+                pkey = X509_get_pubkey(cert);
+                if (!pkey || EVP_PKEY_id(pkey) != EVP_PKEY_RSA) {
+                    X509_free(cert);
+                    return EFI_INVALID_PARAMETER;
+                }
+                ctx = RSAPublicKey_dup(pkey->pkey.rsa);
+                fail = ctx == NULL;
+                RSA_free(ctx);
+                EVP_PKEY_free(pkey);
                 X509_free(cert);
-                return EFI_INVALID_PARAMETER;
+                if (fail)
+                    return EFI_INVALID_PARAMETER;
+                cert_data = (void *)cert_data + sig_list->SignatureSize;
             }
-            ctx = RSAPublicKey_dup(pkey->pkey.rsa);
-            fail = ctx == NULL;
-            RSA_free(ctx);
-            EVP_PKEY_free(pkey);
-            X509_free(cert);
-            if (fail)
-                return EFI_INVALID_PARAMETER;
         }
 
-        if ((sig_list->SignatureListSize - sizeof(EFI_SIGNATURE_LIST) -
-                sig_list->SignatureHeaderSize) % sig_list->SignatureSize != 0)
-            return EFI_INVALID_PARAMETER;
-        count += (sig_list->SignatureListSize - sizeof(EFI_SIGNATURE_LIST) -
-                 sig_list->SignatureHeaderSize) / sig_list->SignatureSize;
-
+        count += list_items;
         remaining -= sig_list->SignatureListSize;
         sig_list = (EFI_SIGNATURE_LIST *)((uint8_t *)sig_list +
                    sig_list->SignatureListSize);
@@ -1077,7 +1088,6 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
                                       cur, AUTH_TYPE_PRIVATE,
                                       payload_out, payload_len_out,
                                       digest, timestamp);
-
     }
 
 out:
