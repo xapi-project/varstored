@@ -1267,6 +1267,30 @@ free_efi_variable(struct efi_variable *efi_var)
     free(efi_var);
 }
 
+/* Returns true if two EFI variables are equivalent, false otherwise. */
+static bool
+cmp_efi_variable(struct efi_variable *a, struct efi_variable *b)
+{
+    if (a->name_len != b->name_len)
+        return false;
+    if (a->data_len != b->data_len)
+        return false;
+    if (a->attributes != b->attributes)
+        return false;
+    if (memcmp(&a->guid, &b->guid, GUID_LEN))
+        return false;
+    if (memcmp(&a->timestamp, &b->timestamp, sizeof(a->timestamp)))
+        return false;
+    if (memcmp(a->cert, b->cert, sizeof(a->cert)))
+        return false;
+    if (memcmp(a->name, b->name, a->name_len))
+        return false;
+    if (memcmp(a->data, b->data, a->data_len))
+        return false;
+
+    return true;
+}
+
 static void
 do_set_variable(uint8_t *comm_buf)
 {
@@ -1458,6 +1482,10 @@ do_set_variable(uint8_t *comm_buf)
                     l->data = data;
                     l->data_len = data_len;
                 }
+
+                /* Skip saving if nothing changed. */
+                if (cmp_efi_variable(l, rollback_var))
+                    should_save = false;
             }
             free(name);
             if (should_save && persistent) {
