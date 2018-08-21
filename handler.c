@@ -976,6 +976,17 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
             !memcmp(guid, &gEfiGlobalVariableGuid, GUID_LEN)) {
         enum auth_type type = AUTH_TYPE_PK;
 
+        /*
+         * For the PK, the spec states:
+         * "The variable has the format of a signature database as described in 
+         * “Signature Database” below, with exactly one entry."
+         * Enforce this, as to be consistent with check_signature_list_format
+         */
+        if (append && cur) {
+            status = EFI_INVALID_PARAMETER;
+            goto out;
+        }
+
         if (!auth_enforce)
             type = AUTH_TYPE_NONE;
         else if (setup_mode == 1)

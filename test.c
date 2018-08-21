@@ -1794,22 +1794,15 @@ static void test_secure_set_PK()
                         (uint8_t *)"\1", 1);
 
     /* Try appending a second cert  - should not work */
+    sign_and_check(PK_name, &gEfiGlobalVariableGuid,
+                   ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE,
+                   &test_timeb, (uint8_t *)second_cert, second_len,
+                   &sign_first_key, EFI_INVALID_PARAMETER);
 
-    /*
-     * TODO: This test fails.
-     *
-     *
-     * sign_and_check(PK_name, &gEfiGlobalVariableGuid,
-     *                ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE,
-     *                &test_timeb, (uint8_t *)second_cert, second_len,
-     *                &sign_first_key, EFI_SUCCESS);
-     *
-     * check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
-     *                  BSIZ, 0, (uint8_t *)"\0", 1);
-     */
+    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, (uint8_t *)"\0", 1);
 
     /* Try setting two keys in one write, two lists */
-
     joint_cert = malloc(first_len + second_len);
     assert(joint_cert);
     memcpy(joint_cert, first_cert, first_len);
@@ -1825,7 +1818,6 @@ static void test_secure_set_PK()
     free(joint_cert);
 
     /* Multiple Keys at once - in one list */
-
     char *cert_list[3] = { "testPK.pem", "testPK2.pem", NULL };
     read_x509_list_into_CertList(cert_list, &joint_cert, &joint_len);
 
