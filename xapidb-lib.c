@@ -58,25 +58,13 @@
       "</params>" \
     "</methodCall>"
 
-#define VM_REMOVE_FROM_NVRAM_CALL \
+#define VM_SET_NVRAM_EFI_VARIABLES_CALL \
     "<?xml version='1.0'?>" \
     "<methodCall>" \
-      "<methodName>VM.remove_from_NVRAM</methodName>" \
+      "<methodName>VM.set_NVRAM_EFI_variables</methodName>" \
       "<params>" \
         "<param><value><string>%s</string></value></param>" \
         "<param><value><string>%s</string></value></param>" \
-        "<param><value><string>EFI-variables</string></value></param>" \
-      "</params>" \
-    "</methodCall>"
-
-#define VM_ADD_TO_NVRAM_CALL \
-    "<?xml version='1.0'?>" \
-    "<methodCall>" \
-      "<methodName>VM.add_to_NVRAM</methodName>" \
-      "<params>" \
-        "<param><value><string>%s</string></value></param>" \
-        "<param><value><string>%s</string></value></param>" \
-        "<param><value><string>EFI-variables</string></value></param>" \
         "<param><value><string>%s</string></value></param>" \
       "</params>" \
     "</methodCall>"
@@ -344,15 +332,7 @@ send_to_xapi(char *uuid, char *data)
     free(response);
     response = NULL;
 
-    status = xmlrpc_call(&response, VM_REMOVE_FROM_NVRAM_CALL, session_ref, vm_ref);
-    if (status != HTTP_STATUS_OK)
-        goto out;
-    if (!xmlrpc_process(response, NULL))
-        goto out;
-    free(response);
-    response = NULL;
-
-    status = xmlrpc_call(&response, VM_ADD_TO_NVRAM_CALL, session_ref, vm_ref, data);
+    status = xmlrpc_call(&response, VM_SET_NVRAM_EFI_VARIABLES_CALL, session_ref, vm_ref, data);
     if (status != HTTP_STATUS_OK)
         goto out;
     if (!xmlrpc_process(response, NULL))
