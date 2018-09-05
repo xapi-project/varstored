@@ -94,6 +94,14 @@ char *xapidb_arg_init;
 char *xapidb_arg_uuid;
 
 /*
+ * The VM's opaqueref: cached for the lifetime of varstored.
+ * This only changes during storage migration, but then we start a new varstored on
+ * the destination, so for the lifetime of a particular varstored instance this
+ * does not change.
+ */
+static char *xapidb_vm_ref;
+
+/*
  * Serializes the list of variables into a buffer. The buffer must be freed by
  * the caller. Returns the length of the buffer on success otherwise 0.
  */
@@ -314,7 +322,7 @@ send_to_xapi(char *uuid, char *data)
 {
     int status;
     bool ret = false;
-    char *session_ref = NULL, *vm_ref = NULL, *response = NULL;
+    char *session_ref = NULL, *response = NULL;
 
     status = xmlrpc_call(&response, LOGIN_CALL);
     if (status != HTTP_STATUS_OK)
@@ -324,15 +332,21 @@ send_to_xapi(char *uuid, char *data)
     free(response);
     response = NULL;
 
-    status = xmlrpc_call(&response, VM_GET_BY_UUID_CALL, session_ref, uuid);
-    if (status != HTTP_STATUS_OK)
-        goto out;
-    if (!xmlrpc_process(response, &vm_ref))
-        goto out;
-    free(response);
-    response = NULL;
+    if (!xapidb_vm_ref) {
+        status = xmlrpc_call(&response, VM_GET_BY_UUID_CALL, session_ref, uuid);
+        if (status != HTTP_STATUS_OK) {
+            ERR("Failed to communicate with XAPI\n");
+            goto out;
+        }
+        if (!xmlrpc_process(response, &xapidb_vm_ref)) {
+            ERR("Failed to lookup VM\n");
+            goto out;
+        }
+        free(response);
+        response = NULL;
+    }
 
-    status = xmlrpc_call(&response, VM_SET_NVRAM_EFI_VARIABLES_CALL, session_ref, vm_ref, data);
+    status = xmlrpc_call(&response, VM_SET_NVRAM_EFI_VARIABLES_CALL, session_ref, xapidb_vm_ref, data);
     if (status != HTTP_STATUS_OK)
         goto out;
     if (!xmlrpc_process(response, NULL))
@@ -352,7 +366,6 @@ send_to_xapi(char *uuid, char *data)
 
 out:
     free(session_ref);
-    free(vm_ref);
     free(response);
     return ret;
 }
@@ -557,7 +570,7 @@ get_from_xapi(const char *uuid, char **out)
 {
     int status;
     bool ret = false;
-    char *session_ref = NULL, *vm_ref = NULL, *response = NULL;
+    char *session_ref = NULL, *response = NULL;
 
     status = xmlrpc_call(&response, LOGIN_CALL);
     if (status != HTTP_STATUS_OK) {
@@ -576,14 +589,14 @@ get_from_xapi(const char *uuid, char **out)
         ERR("Failed to communicate with XAPI\n");
         goto out;
     }
-    if (!xmlrpc_process(response, &vm_ref)) {
+    if (!xmlrpc_process(response, &xapidb_vm_ref)) {
         ERR("Failed to lookup VM\n");
         goto out;
     }
     free(response);
     response = NULL;
 
-    status = xmlrpc_call(&response, VM_GET_NVRAM_CALL, session_ref, vm_ref);
+    status = xmlrpc_call(&response, VM_GET_NVRAM_CALL, session_ref, xapidb_vm_ref);
     if (status != HTTP_STATUS_OK) {
         ERR("Failed to get EFI variables\n");
         goto out;
@@ -611,7 +624,6 @@ get_from_xapi(const char *uuid, char **out)
 
 out:
     free(session_ref);
-    free(vm_ref);
     free(response);
     return ret;
 }
