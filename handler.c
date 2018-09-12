@@ -1568,7 +1568,6 @@ do_set_variable(uint8_t *comm_buf)
         }
 
         if (data_len == 0) {
-            free(data);
             serialize_result(&ptr, EFI_NOT_FOUND);
             goto err;
         }
