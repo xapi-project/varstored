@@ -54,6 +54,9 @@ static dstring *setupMode_name;
 static dstring *secureBoot_name;
 static dstring *PK_name;
 static dstring *KEK_name;
+static dstring *db_name;
+static dstring *dbx_name;
+static dstring *dbt_name;
 
 static EFI_GUID testOwnerGuid = {{7, 5, 3, 8, 9, 6, 1, 3,
                                   2, 3, 4, 5, 4, 6, 7, 8}};
@@ -62,9 +65,19 @@ EFI_TIME test_timea = {2018, 6, 20, 13, 38, 1, 0, 0, 0, 0, 0};
 EFI_TIME test_timeb = {2018, 6, 20, 13, 38, 2, 0, 0, 0, 0, 0};
 EFI_TIME test_timec = {2018, 6, 20, 13, 38, 3, 0, 0, 0, 0, 0};
 
+static EFI_SIGNATURE_LIST *certA;
+static size_t certA_len;
+static EFI_SIGNATURE_LIST *certB;
+static size_t certB_len;
+static EFI_SIGNATURE_LIST *certPK;
+static size_t certPK_len;
+
 #define BSIZ 1024 /* general buffer size */
 
 /* Assert statements, which provide info about the failure */
+
+#define assert_cmpmem(m1, l1, m2, l2) \
+    g_assert_true(l1 == l2 && memcmp(m1, m2, l1) == 0)
 
 #define vsd_assert_status(_txt, _x, _y, _z, ...) \
     do { \
@@ -228,6 +241,9 @@ struct backend testdb = {
 };
 struct backend *db = &testdb;
 
+static void read_x509_into_CertList(char *certfile,
+                                    EFI_SIGNATURE_LIST **ret_cert, size_t *len);
+
 static void setup_globals(void)
 {
     tname1 = alloc_dstring("foo");
@@ -242,7 +258,37 @@ static void setup_globals(void)
     PK_name = alloc_dstring("PK");
     KEK_name = alloc_dstring("KEK");
 
+    db_name = alloc_dstring("db");
+    dbx_name = alloc_dstring("dbx");
+    dbt_name = alloc_dstring("dbt");
+
     secure_boot_enable = true;
+
+    read_x509_into_CertList("testcertA.pem", &certA, &certA_len);
+    read_x509_into_CertList("testcertB.pem", &certB, &certB_len);
+    read_x509_into_CertList("testPK.pem", &certPK, &certPK_len);
+}
+
+static void free_globals(void)
+{
+    free_dstring(tname1);
+    free_dstring(tname2);
+    free_dstring(tname3);
+    free_dstring(tname4);
+    free_dstring(tname5);
+
+    free_dstring(signatureSupport_name);
+    free_dstring(setupMode_name);
+    free_dstring(secureBoot_name);
+    free_dstring(PK_name);
+    free_dstring(KEK_name);
+    free_dstring(db_name);
+    free_dstring(dbx_name);
+    free_dstring(dbt_name);
+
+    free(certA);
+    free(certB);
+    free(certPK);
 }
 
 static void reset_vars(void)
@@ -379,10 +425,10 @@ struct sign_details
     char *digest;
 };
 
-struct sign_details sign_first_key = {"testPK.pem", "testPK.key", "SHA256"};
+struct sign_details sign_testPK = {"testPK.pem", "testPK.key", "SHA256"};
 struct sign_details sign_bad_digest = {"testPK.pem", "testPK.key", "SHA224"};
-struct sign_details sign_second_key = {"testPK2.pem", "testPK2.key", "SHA256"};
-struct sign_details sign_mixed_keys = {"testPK.pem", "testPK2.key", "SHA256"};
+struct sign_details sign_certB = {"testcertB.pem", "testcertB.key", "SHA256"};
+struct sign_details sign_mixed_keys = {"testPK.pem", "testcertB.key", "SHA256"};
 
 static void setup_ssl(void)
 {
@@ -612,7 +658,7 @@ static void sign_and_check_(const dstring *varname, const EFI_GUID *vendor_guid,
 #define check_variable_data(_name, _guid, _avai, _runtime, _expected, _len) \
     check_variable_data_(_name, _guid, _avai, _runtime, _expected, _len, __LINE__)
 
-static void check_variable_data_(dstring *name, const EFI_GUID *guid,
+static void check_variable_data_(const dstring *name, const EFI_GUID *guid,
                                  UINTN avail, BOOLEAN at_runtime,
                                  const uint8_t *expected_data,
                                  UINTN expected_len, int line)
@@ -1118,7 +1164,7 @@ static void test_set_variable_attr(void)
      */
      sign_and_check(tname2, &tguid1,
                     ATTR_B_TIME | EFI_VARIABLE_ENHANCED_AUTHENTICATED_ACCESS,
-                    &test_timea, tdata1, sizeof(tdata1), &sign_first_key,
+                    &test_timea, tdata1, sizeof(tdata1), &sign_testPK,
                     EFI_INVALID_PARAMETER);
 }
 
@@ -1571,6 +1617,15 @@ static void test_set_variable_non_volatile(void)
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 }
 
+static void set_usermode()
+{
+    /* Move into user mode by enrolling Platform Key. */
+
+    sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+                   &test_timea, (uint8_t *)certPK, certPK_len,
+                   &sign_testPK, EFI_SUCCESS);
+}
+
 __attribute__((unused)) static void test_use_bad_digest(void)
 {
     /*
@@ -1602,14 +1657,14 @@ static void test_set_secure_variable(void)
     /* 1. Create a EFI_VARIABLE_AUTHENTICATION_2 variable */
     sign_and_check(tname1, &tguid1, ATTR_B_TIME, &test_timea,
                    (uint8_t *)tosign_data, strlen((char *)tosign_data),
-                   &sign_first_key, EFI_SUCCESS);
+                   &sign_testPK, EFI_SUCCESS);
     check_variable_data(tname1, &tguid1, BSIZ, 0,
                         (uint8_t *)tosign_data, strlen(tosign_data));
 
     /* 2. try append */
     sign_and_check(tname1, &tguid1, ATTR_B_TIME | EFI_VARIABLE_APPEND_WRITE,
                    &test_timeb, (uint8_t *)tosign2_data, strlen(tosign2_data),
-                   &sign_first_key, EFI_SUCCESS);
+                   &sign_testPK, EFI_SUCCESS);
     check_variable_data(tname1, &tguid1, BSIZ, 0,
                         (uint8_t *)tosign_appended_data,
                         strlen(tosign_appended_data));
@@ -1617,7 +1672,7 @@ static void test_set_secure_variable(void)
     /* 3. Try append with older time stamp (is meant to work!) */
     sign_and_check(tname1, &tguid1, ATTR_B_TIME | EFI_VARIABLE_APPEND_WRITE,
                    &test_timea, (uint8_t *)tosign3_data, strlen(tosign3_data),
-                   &sign_first_key, EFI_SUCCESS);
+                   &sign_testPK, EFI_SUCCESS);
     check_variable_data(tname1, &tguid1, BSIZ, 0,
                         (uint8_t *)tosign_appended2_data,
                         strlen(tosign_appended2_data));
@@ -1628,7 +1683,7 @@ static void test_set_secure_variable(void)
      */
     sign_and_check(tname1, &tguid1, ATTR_B_TIME, &test_timeb,
                    (uint8_t *)tosign3_data, strlen(tosign3_data),
-                   &sign_first_key, EFI_SECURITY_VIOLATION);
+                   &sign_testPK, EFI_SECURITY_VIOLATION);
     check_variable_data(tname1, &tguid1, BSIZ, 0,
                         (uint8_t *)tosign_appended2_data,
                         strlen(tosign_appended2_data));
@@ -1641,7 +1696,7 @@ static void test_set_secure_variable(void)
      */
     len = sign(&sign_buffer, tname1, &tguid1,
                ATTR_B_TIME, &test_timec, (uint8_t *)tosign2_data,
-               strlen(tosign2_data), &sign_first_key);
+               strlen(tosign2_data), &sign_testPK);
     assert(len);
     sv_check(tname1, &tguid1, sign_buffer, len, ATTR_B_TIME |
              EFI_VARIABLE_APPEND_WRITE, EFI_SECURITY_VIOLATION);
@@ -1655,7 +1710,7 @@ static void test_set_secure_variable(void)
     /* 4. Try updating with wrong key */
     sign_and_check(tname1, &tguid1, ATTR_B_TIME, &test_timec,
                    (uint8_t *)tosign2_data, strlen(tosign2_data),
-                   &sign_second_key, EFI_SECURITY_VIOLATION);
+                   &sign_certB, EFI_SECURITY_VIOLATION);
 
     /* check it's the same */
     check_variable_data(tname1, &tguid1, BSIZ, 0,
@@ -1664,7 +1719,7 @@ static void test_set_secure_variable(void)
 
     /* try deleting */
     sign_and_check(tname1, &tguid1, ATTR_B_TIME, &test_timec, NULL, 0,
-                   &sign_first_key, EFI_SUCCESS);
+                   &sign_testPK, EFI_SUCCESS);
 }
 
 static void test_secure_set_variable_setupmode(void)
@@ -1685,9 +1740,6 @@ static void test_secure_set_variable_setupmode(void)
 
 static void test_secure_set_variable_usermode()
 {
-    EFI_SIGNATURE_LIST *ret_cert;
-    size_t certlen;
-
     reset_vars();
     setup_variables();
 
@@ -1695,13 +1747,8 @@ static void test_secure_set_variable_usermode()
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
 
-    /* Move into user mode by enrolling Platform Key. */
-    read_x509_into_CertList("testPK.pem", &ret_cert, &certlen);
+    set_usermode();
 
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_timea, (uint8_t *)ret_cert, certlen,
-                   &sign_first_key, EFI_SUCCESS);
-    free(ret_cert);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
 
@@ -1710,8 +1757,8 @@ static void test_secure_set_variable_usermode()
 
 static void test_secure_set_PK()
 {
-    EFI_SIGNATURE_LIST *first_cert, *second_cert, *joint_cert;
-    size_t first_len, second_len, joint_len;
+    EFI_SIGNATURE_LIST *joint_cert;
+    size_t joint_len;
     uint8_t *ptr;
 
     reset_vars();
@@ -1722,12 +1769,10 @@ static void test_secure_set_PK()
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
 
-    read_x509_into_CertList("testPK.pem", &first_cert, &first_len);
-
     /* try cert, signed by someone unknown. Should be no mode change. */
     sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_timea, (uint8_t *)first_cert, first_len,
-                   &sign_second_key, EFI_SECURITY_VIOLATION);
+                   &test_timea, (uint8_t *)certPK, certPK_len,
+                   &sign_certB, EFI_SECURITY_VIOLATION);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
@@ -1735,29 +1780,29 @@ static void test_secure_set_PK()
 
     /* try setting PK, with wrong attributes */
 
-    sv_check(PK_name, &gEfiGlobalVariableGuid, (uint8_t *)first_cert, first_len,
+    sv_check(PK_name, &gEfiGlobalVariableGuid, (uint8_t *)certPK, certPK_len,
              ATTR_BRNV, EFI_INVALID_PARAMETER);
 
     sign_and_check(PK_name, &gEfiGlobalVariableGuid,
                    EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS,
-                   &test_timea, (uint8_t *)first_cert, first_len,
-                   &sign_second_key, EFI_NOT_FOUND);
+                   &test_timea, (uint8_t *)certPK, certPK_len,
+                   &sign_certB, EFI_NOT_FOUND);
 
     sign_and_check(PK_name, &gEfiGlobalVariableGuid,
                    ATTR_B_TIME | EFI_VARIABLE_RUNTIME_ACCESS,
-                   &test_timea, (uint8_t *)first_cert, first_len,
-                   &sign_second_key, EFI_INVALID_PARAMETER);
+                   &test_timea, (uint8_t *)certPK, certPK_len,
+                   &sign_certB, EFI_INVALID_PARAMETER);
 
     sign_and_check(PK_name, &gEfiGlobalVariableGuid,
                    ATTR_B_TIME | EFI_VARIABLE_NON_VOLATILE,
-                   &test_timea, (uint8_t *)first_cert, first_len,
-                   &sign_second_key, EFI_INVALID_PARAMETER);
+                   &test_timea, (uint8_t *)certPK, certPK_len,
+                   &sign_certB, EFI_INVALID_PARAMETER);
 
     sign_and_check(PK_name, &gEfiGlobalVariableGuid,
                    EFI_VARIABLE_RUNTIME_ACCESS | EFI_VARIABLE_NON_VOLATILE |
                    EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS,
-                   &test_timea, (uint8_t *)first_cert, first_len,
-                   &sign_second_key, EFI_INVALID_PARAMETER);
+                   &test_timea, (uint8_t *)certPK, certPK_len,
+                   &sign_certB, EFI_INVALID_PARAMETER);
 
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
@@ -1766,19 +1811,17 @@ static void test_secure_set_PK()
 
     /* Set PK, self signed - should move to user mode */
     sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_timea, (uint8_t *)first_cert, first_len,
-                   &sign_first_key, EFI_SUCCESS);
+                   &test_timea, (uint8_t *)certPK, certPK_len,
+                   &sign_testPK, EFI_SUCCESS);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
 
-    read_x509_into_CertList("testPK2.pem", &second_cert, &second_len);
-
     /* new cert, signed by self */
     sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_timeb, (uint8_t *)second_cert, second_len,
-                   &sign_second_key, EFI_SECURITY_VIOLATION);
+                   &test_timeb, (uint8_t *)certB, certB_len,
+                   &sign_certB, EFI_SECURITY_VIOLATION);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
@@ -1786,8 +1829,8 @@ static void test_secure_set_PK()
 
     /* new cert, truncated */
     sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_timeb, (uint8_t *)second_cert, second_len - 8,
-                   &sign_first_key, EFI_INVALID_PARAMETER);
+                   &test_timeb, (uint8_t *)certB, certB_len - 8,
+                   &sign_testPK, EFI_INVALID_PARAMETER);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
@@ -1796,42 +1839,42 @@ static void test_secure_set_PK()
     /* Try appending a second cert  - should not work */
     sign_and_check(PK_name, &gEfiGlobalVariableGuid,
                    ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE,
-                   &test_timeb, (uint8_t *)second_cert, second_len,
-                   &sign_first_key, EFI_INVALID_PARAMETER);
+                   &test_timeb, (uint8_t *)certB, certB_len,
+                   &sign_testPK, EFI_INVALID_PARAMETER);
 
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
 
     /* Try setting two keys in one write, two lists */
-    joint_cert = malloc(first_len + second_len);
+    joint_cert = malloc(certPK_len + certB_len);
     assert(joint_cert);
-    memcpy(joint_cert, first_cert, first_len);
+    memcpy(joint_cert, certPK, certPK_len);
 
-    ptr = (uint8_t *)joint_cert + first_len;
-    memcpy(ptr, second_cert, second_len);
-    joint_len = first_len + second_len;
+    ptr = (uint8_t *)joint_cert + certPK_len;
+    memcpy(ptr, certB, certB_len);
+    joint_len = certPK_len + certB_len;
 
     sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                    &test_timeb, (uint8_t *)joint_cert, joint_len,
-                   &sign_first_key, EFI_INVALID_PARAMETER);
+                   &sign_testPK, EFI_INVALID_PARAMETER);
 
     free(joint_cert);
 
     /* Multiple Keys at once - in one list */
-    char *cert_list[3] = { "testPK.pem", "testPK2.pem", NULL };
+    char *cert_list[] = {"testPK.pem", "testcertB.pem", NULL};
     read_x509_list_into_CertList(cert_list, &joint_cert, &joint_len);
 
     sign_and_check(PK_name, &gEfiGlobalVariableGuid,
                    ATTR_BRNV_TIME,
                    &test_timeb, (uint8_t *)joint_cert, joint_len,
-                   &sign_first_key, EFI_INVALID_PARAMETER);
+                   &sign_testPK, EFI_INVALID_PARAMETER);
 
     free(joint_cert);
 
     /* new cert, signed by previous */
     sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_timeb, (uint8_t *)second_cert, second_len,
-                   &sign_first_key, EFI_SUCCESS);
+                   &test_timeb, (uint8_t *)certB, certB_len,
+                   &sign_testPK, EFI_SUCCESS);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
@@ -1839,7 +1882,7 @@ static void test_secure_set_PK()
 
     /* delete it, with first (should fail) */
     sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_timec, NULL, 0, &sign_first_key, EFI_SECURITY_VIOLATION);
+                   &test_timec, NULL, 0, &sign_testPK, EFI_SECURITY_VIOLATION);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
@@ -1847,106 +1890,198 @@ static void test_secure_set_PK()
 
     /* delete it, with second */
     sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_timec, NULL, 0, &sign_second_key, EFI_SUCCESS);
+                   &test_timec, NULL, 0, &sign_certB, EFI_SUCCESS);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
     sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_timeb, NULL, 0, &sign_first_key, EFI_NOT_FOUND);
+                   &test_timeb, NULL, 0, &sign_testPK, EFI_NOT_FOUND);
+}
 
-    free(first_cert);
-    free(second_cert);
+static void sig_db_check(const dstring *key_db, const EFI_GUID *guid,
+                         EFI_TIME *time, bool setup)
+{
+    uint8_t *ptr, *data, *data_ptr;
+    UINTN data_len;
+    UINT32 attr;
+    EFI_STATUS status;
+    uint8_t *setupmode = setup ? (uint8_t *)"\1" : (uint8_t *)"\0";
+    uint8_t *securemode = setup ? (uint8_t *)"\0" : (uint8_t *)"\1";
+
+    /* Check SetupMode and SecureBoot vars are as expected */
+    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, setupmode, 1);
+    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                        securemode, 1);
+
+    sv_check(key_db, guid, (uint8_t *)certA, certA_len,
+             ATTR_BRNV, EFI_INVALID_PARAMETER);
+
+    sign_and_check(key_db, guid,
+                   EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS,
+                   time, (uint8_t *)certA, certA_len,
+                   &sign_certB, EFI_NOT_FOUND);
+
+    sign_and_check(key_db, guid,
+                   ATTR_B_TIME | EFI_VARIABLE_RUNTIME_ACCESS,
+                   time, (uint8_t *)certA, certA_len,
+                   &sign_certB, EFI_INVALID_PARAMETER);
+
+    sign_and_check(key_db, guid,
+                   ATTR_B_TIME | EFI_VARIABLE_NON_VOLATILE,
+                   time, (uint8_t *)certA, certA_len,
+                   &sign_certB, EFI_INVALID_PARAMETER);
+
+    sign_and_check(key_db, guid,
+                   EFI_VARIABLE_RUNTIME_ACCESS | EFI_VARIABLE_NON_VOLATILE |
+                   EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS,
+                   time, (uint8_t *)certA, certA_len,
+                   &sign_certB, EFI_INVALID_PARAMETER);
+
+    /* new cert, truncated */
+    sign_and_check(key_db, guid, ATTR_BRNV_TIME,
+                   time, (uint8_t *)certA, certA_len - 8,
+                   &sign_testPK, EFI_INVALID_PARAMETER);
+
+    /* try a valid signed cert, but not signed by PK */
+    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time, (uint8_t *)certB, certB_len,
+                   &sign_certB, setup ? EFI_SUCCESS : EFI_SECURITY_VIOLATION);
+
+    if (setup) {
+        time->Second++;
+        check_variable_data(key_db, guid, BSIZ, 0, (uint8_t *)certB, certB_len);
+    }
+
+    /* try a cert, signed by someone unknown. */
+    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time, (uint8_t *)certA, certA_len,
+                   &sign_certB, setup ? EFI_SUCCESS : EFI_SECURITY_VIOLATION);
+
+    if (setup) {
+        time->Second++;
+        check_variable_data(key_db, guid, BSIZ, 0, (uint8_t *)certA, certA_len);
+    }
+
+    /* SetupMode and SecureBoot vars should not have changed */
+    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, setupmode, 1);
+    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                        securemode, 1);
+
+    if (!setup) {
+        /* try a valid cert */
+        sign_and_check(key_db, guid, ATTR_BRNV_TIME, time,
+                       (uint8_t *)certA, certA_len, &sign_testPK, EFI_SUCCESS);
+
+        time->Second++;
+        check_variable_data(key_db, guid, BSIZ, 0, (uint8_t *)certA, certA_len);
+    }
+
+    /* SetupMode and SecureBoot vars should not have changed */
+    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, setupmode, 1);
+    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                        securemode, 1);
+
+    /* Try appending another */
+    sign_and_check(key_db, guid,
+                   ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE, time,
+                   (uint8_t *)certB, certB_len, &sign_certB,
+                   setup ? EFI_SUCCESS : EFI_SECURITY_VIOLATION);
+
+    if (!setup)
+        sign_and_check(key_db, guid,
+                       ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE,
+                       time, (uint8_t *)certB, certB_len,
+                       &sign_testPK, EFI_SUCCESS);
+
+    time->Second++;
+
+    /* Check it */
+    call_get_variable(key_db, guid, certA_len + certB_len, 0);
+    ptr = buf;
+    status = unserialize_uintn(&ptr);
+    vsd_assert_status("status", status, ==, EFI_SUCCESS);
+    attr = unserialize_uint32(&ptr);
+    g_assert_cmpuint(attr, ==, ATTR_BRNV_TIME);
+    data = unserialize_data(&ptr, &data_len, certA_len + certB_len);
+    assert_cmpmem(data, data_len - certB_len, certA, certA_len);
+    data_ptr = data + certA_len;
+    assert_cmpmem(data_ptr, data_len - certA_len, certB, certB_len);
+
+    /* Delete */
+    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time, NULL, 0, &sign_certB,
+                   setup ? EFI_SUCCESS : EFI_SECURITY_VIOLATION);
+
+    if (!setup)
+        sign_and_check(key_db, guid, ATTR_BRNV_TIME, time, NULL, 0,
+                       &sign_testPK, EFI_SUCCESS);
+
+    /* Try deleting again */
+    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time, NULL, 0,
+                   &sign_testPK, EFI_NOT_FOUND);
+
+    free(data);
+}
+
+static void sig_db_check_multi(const dstring *key_db, const EFI_GUID *guid,
+                               EFI_TIME *time)
+{
+    EFI_SIGNATURE_LIST *combined_cert;
+    size_t combined_len;
+    char *cert_list[] = {"testcertB.pem", "testcertA.pem", NULL};
+    uint8_t *cert_data, *first_data, *second_data;
+    uint8_t temp;
+
+    read_x509_list_into_CertList(cert_list, &combined_cert, &combined_len);
+
+    cert_data = (uint8_t*)combined_cert + sizeof(EFI_SIGNATURE_LIST);
+    first_data = cert_data + offsetof(EFI_SIGNATURE_DATA, SignatureData);
+
+    /* Corrupt first cert */
+    temp = *first_data;
+    *first_data = -1;
+
+    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time,
+                   (uint8_t *)combined_cert, combined_len,
+                   &sign_testPK, EFI_INVALID_PARAMETER);
+
+    *first_data = temp;
+
+    /* Corrupt second cert */
+    second_data = cert_data + combined_cert->SignatureSize +
+                  offsetof(EFI_SIGNATURE_DATA, SignatureData);
+    temp = *second_data;
+    *second_data = -1;
+
+    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time,
+                   (uint8_t *)combined_cert, combined_len,
+                   &sign_testPK, EFI_INVALID_PARAMETER);
+    *second_data = temp;
+
+    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time,
+                  (uint8_t *)combined_cert, combined_len,
+                  &sign_testPK, EFI_SUCCESS);
+    free(combined_cert);
 }
 
 static void test_secure_set_KEK_setupmode()
 {
-    EFI_SIGNATURE_LIST *first_cert, *second_cert;
-    size_t first_len, second_len;
-
     uint8_t *ptr, *data, *data_ptr;
     EFI_STATUS status;
     UINTN data_len;
     UINT32 attr;
-    int cmp;
-
     EFI_TIME test_time = {2018, 6, 20, 13, 38, 0, 0, 0, 0, 0, 0};
 
     reset_vars();
     setup_variables();
 
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
-                        (uint8_t *)"\1", 1);
-    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
-                        (uint8_t *)"\0", 1);
-
-    read_x509_into_CertList("testPK.pem", &first_cert, &first_len);
-
-    /* try setting KEK, with wrong attributes */
-
-    sv_check(KEK_name, &gEfiGlobalVariableGuid, (uint8_t *)first_cert, first_len,
-             ATTR_BRNV, EFI_INVALID_PARAMETER);
-
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
-                   EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS,
-                   &test_time, (uint8_t *)first_cert, first_len,
-                   &sign_second_key, EFI_NOT_FOUND);
-
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
-                   ATTR_B_TIME | EFI_VARIABLE_RUNTIME_ACCESS,
-                   &test_time, (uint8_t *)first_cert, first_len,
-                   &sign_second_key, EFI_INVALID_PARAMETER);
-
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
-                   ATTR_B_TIME | EFI_VARIABLE_NON_VOLATILE,
-                   &test_time, (uint8_t *)first_cert, first_len,
-                   &sign_second_key, EFI_INVALID_PARAMETER);
-
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
-                   EFI_VARIABLE_RUNTIME_ACCESS | EFI_VARIABLE_NON_VOLATILE |
-                   EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS,
-                   &test_time, (uint8_t *)first_cert, first_len,
-                   &sign_second_key, EFI_INVALID_PARAMETER);
-
-    read_x509_into_CertList("testPK2.pem", &second_cert, &second_len);
-
-    /* new cert, truncated */
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_time, (uint8_t *)second_cert, second_len - 8,
-                   &sign_first_key, EFI_INVALID_PARAMETER);
-
-    /*
-     * While no Platform Key is enrolled, the SetupMode variable shall be equal
-     * to 1. While SetupMode == 1, the platform firmware shall not require
-     * authentication in order to modify the Platform Key, Key Enrollment Key,
-     * OsRecoveryOrder, OsRecovery####, and image security databases.
-     */
-
-    /* try a cert, signed by someone unknown. */
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_time, (uint8_t *)first_cert, first_len,
-                   &sign_second_key, EFI_SUCCESS);
-
-    test_time.Second++;
-
-    call_get_variable(KEK_name, &gEfiGlobalVariableGuid, BSIZ, 0);
-    ptr = buf;
-    status = unserialize_uintn(&ptr);
-    g_assert_cmpuint(status, ==, EFI_SUCCESS);
-
-    check_variable_data(KEK_name, &gEfiGlobalVariableGuid, BSIZ, 0,
-                        (uint8_t *)first_cert, first_len);
-
-    /* SetupMode and SecureBoot vars should not have changed */
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
-                        BSIZ, 0, (uint8_t *)"\1", 1);
-    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
-                        (uint8_t *)"\0", 1);
+    sig_db_check(KEK_name, &gEfiGlobalVariableGuid, &test_time, true);
 
     /* new cert, signed by self */
     sign_and_check(KEK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_time, (uint8_t *)second_cert, second_len,
-                   &sign_second_key, EFI_SUCCESS);
+                   &test_time, (uint8_t *)certB, certB_len,
+                   &sign_certB, EFI_SUCCESS);
     test_time.Second++;
 
     call_get_variable(KEK_name, &gEfiGlobalVariableGuid, BSIZ, 0);
@@ -1957,140 +2092,200 @@ static void test_secure_set_KEK_setupmode()
     /* Try appending a second cert */
 
     sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
-                   ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE,
-                   &test_time, (uint8_t *)first_cert, first_len,
-                   &sign_first_key, EFI_SUCCESS);
+                   ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE, &test_time,
+                   (uint8_t *)certA, certA_len, &sign_testPK, EFI_SUCCESS);
     test_time.Second++;
 
-    call_get_variable(KEK_name, &gEfiGlobalVariableGuid, first_len + second_len, 0);
+    call_get_variable(KEK_name, &gEfiGlobalVariableGuid, certA_len + certB_len, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     vsd_assert_status("status", status, ==, EFI_SUCCESS);
     attr = unserialize_uint32(&ptr);
     g_assert_cmpuint(attr, ==, ATTR_BRNV_TIME);
-    data = unserialize_data(&ptr, &data_len, first_len + second_len);
-    g_assert_cmpuint(data_len, ==, first_len + second_len);
-    cmp = memcmp(data, second_cert, second_len);
-    g_assert_cmpuint(cmp, ==, 0);
-    data_ptr = data + second_len;
-    cmp = memcmp(data_ptr, first_cert, first_len);
-    g_assert_cmpuint(cmp, ==, 0);
+    data = unserialize_data(&ptr, &data_len, certA_len + certB_len);
+    assert_cmpmem(data, data_len - certA_len, certB, certB_len);
+    data_ptr = data + certB_len;
+    assert_cmpmem(data_ptr, data_len - certB_len, certA, certA_len);
 
-    free(first_cert);
-    free(second_cert);
     free(data);
 }
 
 static void test_secure_set_KEK_usermode()
 {
-    EFI_SIGNATURE_LIST *first_cert, *combined_cert;
-    EFI_SIGNATURE_LIST *pk_cert, *pk2_cert;
-    size_t pk_len, first_len, pk2_len, combined_len;
-
-    char *cert_list[3] = { "testPK2.pem", "testKey.pem", NULL };
-    uint8_t *cert_data, *first_data, *second_data;
-    uint8_t temp;
-
     EFI_TIME test_time = {2018, 6, 20, 13, 38, 0, 0, 0, 0, 0, 0};
 
     reset_vars();
     setup_variables();
-    read_x509_into_CertList("testKey.pem", &first_cert, &first_len);
+    set_usermode();
 
-    /* Now try in user mode */
+    sig_db_check(KEK_name, &gEfiGlobalVariableGuid, &test_time, false);
+    sig_db_check_multi(KEK_name, &gEfiGlobalVariableGuid, &test_time);
+}
 
-    /* Move into user mode by enrolling Platform Key. */
-    read_x509_into_CertList("testPK.pem", &pk_cert, &pk_len);
+/*
+ * For variables with the GUID EFI_IMAGE_SECURITY_DATABASE_GUID (i.e. where
+ * the data buffer is formatted as EFI_SIGNATURE_LIST), the driver shall not
+ * perform an append of EFI_SIGNATURE_DATA values that are already part of
+ * the existing variable value.
+ */
+static void test_duplicate_db(const dstring *key_db, const EFI_GUID *guid,
+                              EFI_TIME *time, bool setup)
+{
+    uint8_t *ptr, *data, *data_ptr;
+    EFI_STATUS status;
+    UINTN data_len;
+    UINT32 attr;
 
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_timea, (uint8_t *)pk_cert, pk_len,
-                   &sign_first_key, EFI_SUCCESS);
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
-                        BSIZ, 0, (uint8_t *)"\0", 1);
+    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time,
+                   (uint8_t *)certA, certA_len, &sign_testPK, EFI_SUCCESS);
 
-    /* Signatures should now be checked */
+    time->Second++;
 
-    read_x509_into_CertList("testPK2.pem", &pk2_cert, &pk2_len);
+    sign_and_check(key_db, guid, ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE,
+                   time, (uint8_t *)certB, certB_len, &sign_testPK, EFI_SUCCESS);
 
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_time, (uint8_t *)pk2_cert, pk2_len,
-                   &sign_second_key, EFI_SECURITY_VIOLATION);
+    time->Second++;
 
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
-                   ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE,
-                   &test_time, (uint8_t *)pk2_cert, pk2_len,
-                   &sign_second_key, EFI_SECURITY_VIOLATION);
+    sign_and_check(key_db, guid, ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE,
+                   time, (uint8_t *)certA, certA_len, &sign_testPK, EFI_SUCCESS);
 
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_time, (uint8_t *)pk2_cert, pk2_len,
-                   &sign_first_key, EFI_SUCCESS);
+    /* Check DB - should be two items */
+    call_get_variable(key_db, guid, certA_len * 2 + certB_len, 0);
+    ptr = buf;
+    status = unserialize_uintn(&ptr);
+    vsd_assert_status("status", status, ==, EFI_SUCCESS);
+    attr = unserialize_uint32(&ptr);
+    g_assert_cmpuint(attr, ==, ATTR_BRNV_TIME);
+    data = unserialize_data(&ptr, &data_len, certA_len + certB_len);
+    assert_cmpmem(data, data_len - certB_len, certA, certA_len);
+    data_ptr = data + certA_len;
+    assert_cmpmem(data_ptr, data_len - certA_len, certB, certB_len);
+
+    /* Check timestamp was updated */
+    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time, NULL, 0,
+                   &sign_testPK, setup ? EFI_SUCCESS : EFI_SECURITY_VIOLATION);
+
+    time->Second++;
+    if (!setup)
+        sign_and_check(key_db, guid, ATTR_BRNV_TIME, time, NULL, 0,
+                       &sign_testPK, EFI_SUCCESS);
+
+    free(data);
+}
+
+static void test_secure_set_db__setupmode(const dstring *key_db)
+{
+    EFI_TIME test_time = {2018, 6, 20, 13, 38, 0, 0, 0, 0, 0, 0};
+
+    reset_vars();
+    setup_variables();
+
+    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                        (uint8_t *)"\1", 1);
+
+    sig_db_check(key_db, &gEfiImageSecurityDatabaseGuid, &test_time, true);
+
+    test_duplicate_db(key_db, &gEfiImageSecurityDatabaseGuid, &test_time, true);
+}
+
+static void test_secure_set_db_setupmode()
+{
+    test_secure_set_db__setupmode(db_name);
+}
+
+static void test_secure_set_dbx_setupmode()
+{
+    test_secure_set_db__setupmode(dbx_name);
+}
+
+static void test_secure_set_dbt_setupmode()
+{
+    test_secure_set_db__setupmode(dbt_name);
+}
+
+static void test_secure_set_db__usermode(const dstring *key_db)
+{
+    EFI_TIME test_time = {2018, 6, 20, 13, 38, 0, 0, 0, 0, 0, 0};
+    EFI_SIGNATURE_LIST *combined_cert;
+    size_t combined_len;
+    char *cert_list[] = {"testPK.pem", "testcertB.pem", NULL};
+
+    reset_vars();
+    setup_variables();
+    set_usermode();
+
+    sig_db_check(key_db, &gEfiImageSecurityDatabaseGuid, &test_time, false);
+    sig_db_check_multi(key_db, &gEfiImageSecurityDatabaseGuid, &test_time);
 
     test_time.Second++;
-
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
-                    ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE,
-                    &test_time, (uint8_t *)first_cert, first_len,
-                    &sign_first_key, EFI_SUCCESS);
-
-    test_time.Second++;
-
-    /* Delete KEK */
-
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_time, NULL, 0,
-                   &sign_second_key, EFI_SECURITY_VIOLATION);
-
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_time, NULL, 0,
-                   &sign_first_key, EFI_SUCCESS);
-
-    /* Multiple Keys at once - in one list */
-
-    read_x509_list_into_CertList(cert_list, &combined_cert, &combined_len);
-
-    cert_data = (uint8_t*)combined_cert + sizeof(EFI_SIGNATURE_LIST);
-    first_data = cert_data + offsetof(EFI_SIGNATURE_DATA, SignatureData);
-
-    /* Corrupt first cert */
-
-    temp = *first_data;
-    *first_data = -1;
-
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
-                   ATTR_BRNV_TIME,
-                   &test_time, (uint8_t *)combined_cert, combined_len,
-                   &sign_first_key, EFI_INVALID_PARAMETER);
-
-    *first_data = temp;
-
     /*
-     * Corrupt Second Cert
-     *
+     * Previous checked PK owner can add db key
+     * Now check a KEK key can be used.
      */
-    second_data = cert_data + combined_cert->SignatureSize +
-                  offsetof(EFI_SIGNATURE_DATA, SignatureData);
-    temp = *second_data;
-    *second_data = -1;
+    sign_and_check(KEK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+                   &test_time, (uint8_t *)certB, certB_len,
+                   &sign_testPK, EFI_SUCCESS);
+    sign_and_check(key_db, &gEfiImageSecurityDatabaseGuid, ATTR_BRNV_TIME,
+                   &test_time, (uint8_t *)certA, certA_len,
+                   &sign_certB, EFI_SUCCESS);
 
+    test_time.Second++;
+
+    /* Try it as KEK second key (two lists) */
+    sign_and_check(KEK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+                   &test_time, (uint8_t *)certPK, certPK_len,
+                   &sign_testPK, EFI_SUCCESS);
+
+    sign_and_check(key_db, &gEfiImageSecurityDatabaseGuid, ATTR_BRNV_TIME,
+                   &test_time, (uint8_t *)certA, certA_len,
+                   &sign_certB, EFI_SECURITY_VIOLATION);
+
+    sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
+                   ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE, &test_time,
+                   (uint8_t *)certB, certB_len,
+                   &sign_testPK, EFI_SUCCESS);
+
+    sign_and_check(key_db, &gEfiImageSecurityDatabaseGuid, ATTR_BRNV_TIME,
+                   &test_time, (uint8_t *)certA, certA_len,
+                   &sign_certB, EFI_SUCCESS);
+
+    test_time.Second++;
+
+    /* Try it as KEK second key (one list) */
+    read_x509_list_into_CertList(cert_list, &combined_cert, &combined_len);
     sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
                    ATTR_BRNV_TIME,
                    &test_time, (uint8_t *)combined_cert, combined_len,
-                   &sign_first_key, EFI_INVALID_PARAMETER);
-    *second_data = temp;
+                   &sign_testPK, EFI_SUCCESS);
 
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
-                  ATTR_BRNV_TIME,
-                  &test_time, (uint8_t *)combined_cert, combined_len,
-                  &sign_first_key, EFI_SUCCESS);
+    sign_and_check(key_db, &gEfiImageSecurityDatabaseGuid, ATTR_BRNV_TIME,
+                   &test_time, (uint8_t *)certA, certA_len,
+                   &sign_certB, EFI_SUCCESS);
+    test_time.Second++;
 
+    test_duplicate_db(key_db, &gEfiImageSecurityDatabaseGuid, &test_time, false);
     free(combined_cert);
-    free(pk_cert);
-    free(pk2_cert);
-    free(first_cert);
+}
+
+static void test_secure_set_db_usermode()
+{
+    test_secure_set_db__usermode(db_name);
+}
+
+static void test_secure_set_dbx_usermode()
+{
+    test_secure_set_db__usermode(dbx_name);
+}
+
+static void test_secure_set_dbt_usermode()
+{
+    test_secure_set_db__usermode(dbt_name);
 }
 
 int main(int argc, char **argv)
 {
+    int r;
+
     setup_globals();
     setup_ssl();
 
@@ -2155,5 +2350,21 @@ int main(int argc, char **argv)
     g_test_add_func("/test/secure_set_variable/KEK/usermode",
                     test_secure_set_KEK_usermode);
 
-    return g_test_run();
+    g_test_add_func("/test/secure_set_variable/DB/setupmode",
+                    test_secure_set_db_setupmode);
+    g_test_add_func("/test/secure_set_variable/DBX/setupmode",
+                    test_secure_set_dbx_setupmode);
+    g_test_add_func("/test/secure_set_variable/DBT/setupmode",
+                    test_secure_set_dbt_setupmode);
+
+    g_test_add_func("/test/secure_set_variable/DB/usermode",
+                    test_secure_set_db_usermode);
+    g_test_add_func("/test/secure_set_variable/DBX/usermode",
+                    test_secure_set_dbx_usermode);
+    g_test_add_func("/test/secure_set_variable/DBT/usermode",
+                    test_secure_set_dbt_usermode);
+
+    r = g_test_run();
+    free_globals();
+    return r;
 }

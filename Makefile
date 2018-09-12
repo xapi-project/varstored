@@ -60,7 +60,9 @@ test.o: test.c
 test: test.o guid.o
 	gcc -o $@ $(LDFLAGS) $^ -lcrypto $$(pkg-config --libs glib-2.0)
 
-TESTDEPS := test testPK.pem testPK.key testPK2.pem testPK2.key testKey.pem guid.o
+TESTKEYS := testPK.pem testPK.key testcertA.pem testcertB.pem testcertB.key
+
+TESTDEPS := test $(TESTKEYS) guid.o
 
 check: $(TESTDEPS)
 	./test
@@ -97,7 +99,7 @@ clean:
 	rm -f $(TARGET)
 	rm -f TAGS
 	rm -f test.o test test.dat
-	rm -f testPK.pem testPK.key testPK2.pem testPK2.key testKey.pem testKey.key
+	rm -f $(TESTKEYS)
 	rm -f $(AUTHS)
 	rm -f create-auth
 	rm -f PK.pem PK.key
