@@ -1240,6 +1240,7 @@ filter_signature_list(uint8_t *data, UINTN data_len,
 
     *new_data_len = ptr - buf;
     memcpy(new_data, buf, *new_data_len);
+    free(buf);
 
     return EFI_SUCCESS;
 }
