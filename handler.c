@@ -1579,7 +1579,7 @@ do_set_variable(uint8_t *comm_buf)
             goto err;
         }
 
-        l = malloc(sizeof *l);
+        l = calloc(1, sizeof(*l));
         if (!l) {
             serialize_result(&ptr, EFI_DEVICE_ERROR);
             goto err;
