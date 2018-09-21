@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) Citrix Systems, Inc
+ */
+
 /* Avoid logging anything */
 #define _DEBUG_H
 #define DBG(...)

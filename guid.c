@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) Citrix Systems, Inc
+ */
+
 #include <guid.h>
 
 EFI_GUID gEfiGlobalVariableGuid =

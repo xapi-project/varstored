@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) Citrix Systems, Inc
+ */
+
 #ifndef  BACKEND_H
 #define  BACKEND_H
 

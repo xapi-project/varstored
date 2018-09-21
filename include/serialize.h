@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) Citrix Systems, Inc
+ */
+
 #ifndef SERIALIZE_H
 #define SERIALIZE_H
 

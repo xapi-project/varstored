@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) Citrix Systems, Inc
+ */
+
 #include <linux/pci_regs.h>
 
 #ifndef  _PCI_H

@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) Citrix Systems, Inc
+ */
+
 #ifndef  OPTION_H
 #define  OPTION_H
 

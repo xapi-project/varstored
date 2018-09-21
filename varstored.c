@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) Citrix Systems, Inc
+ */
+
 #include <err.h>
 #include <errno.h>
 #include <fcntl.h>

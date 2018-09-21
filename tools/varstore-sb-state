@@ -1,5 +1,9 @@
 #!/bin/sh
 
+#
+# Copyright (C) Citrix Systems, Inc
+#
+
 # varstore-sb-state can either clear a VM's variables related to SecureBoot
 # or reset them as though the VM were newly created.
 

@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) Citrix Systems, Inc
+ */
+
 #ifndef  HANDLER_H
 #define  HANDLER_H
 

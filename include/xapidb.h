@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) Citrix Systems, Inc
+ */
+
 #ifndef XAPIDB_H
 #define XAPIDB_H
 

@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) Citrix Systems, Inc
+ */
+
 #ifndef  _DEBUG_H
 #define  _DEBUG_H
 

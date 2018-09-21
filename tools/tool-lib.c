@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) Citrix Systems, Inc
+ */
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>

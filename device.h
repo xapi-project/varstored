@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) Citrix Systems, Inc
+ */
+
 #ifndef  _DEVICE_H
 #define  _DEVICE_H
 

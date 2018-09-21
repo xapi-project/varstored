@@ -1,3 +1,7 @@
+/*
+ * Copyright (C) Citrix Systems, Inc
+ */
+
 #ifndef LIB_PROG_H
 #define LIB_PROG_H
 
