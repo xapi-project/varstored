@@ -1834,6 +1834,7 @@ set_variable_from_auth(uint8_t *name, UINTN name_len, EFI_GUID *guid,
     if (fstat(fileno(f), &st) == -1) {
         DBG("Failed to stat '%s'\n", path);
         fclose(f);
+        return false;
     }
 
     data = malloc(st.st_size);
