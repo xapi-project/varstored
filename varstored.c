@@ -40,9 +40,8 @@
 #include <handler.h>
 #include <backend.h>
 
-#include "device.h"
+#include "io_port.h"
 #include "option.h"
-#include "pci.h"
 
 #define mb() asm volatile ("" : : : "memory")
 
@@ -50,8 +49,6 @@
 
 enum {
     VARSTORED_OPT_DOMAIN,
-    VARSTORED_OPT_DEVICE,
-    VARSTORED_OPT_FUNCTION,
     VARSTORED_OPT_RESUME,
     VARSTORED_OPT_NONPERSISTENT,
     VARSTORED_OPT_PIDFILE,
@@ -62,8 +59,6 @@ enum {
 
 static struct option varstored_option[] = {
     {"domain", 1, NULL, 0},
-    {"device", 1, NULL, 0},
-    {"function", 1, NULL, 0},
     {"resume", 0, NULL, 0},
     {"nonpersistent", 0, NULL, 0},
     {"pidfile", 1, NULL, 0},
@@ -74,8 +69,6 @@ static struct option varstored_option[] = {
 
 static const char *varstored_option_text[] = {
     "<domid>",
-    "<device>",
-    "<function>",
     NULL,
     NULL,
     "<pidfile>",
@@ -123,7 +116,7 @@ typedef enum {
     VARSTORED_SEQ_EVTCHN_OPEN,
     VARSTORED_SEQ_PORTS_BOUND,
     VARSTORED_SEQ_BUF_PORT_BOUND,
-    VARSTORED_SEQ_DEVICE_INITIALIZED,
+    VARSTORED_SEQ_PORT_INITIALIZED,
     VARSTORED_SEQ_WROTE_PID,
     VARSTORED_SEQ_INITIALIZED,
     VARSTORED_NR_SEQS
@@ -234,50 +227,10 @@ static void
 handle_pio(ioreq_t *ioreq)
 {
     if (ioreq->dir == IOREQ_READ) {
-        if (!ioreq->data_is_ptr) {
-            ioreq->data = (uint64_t)pci_bar_read(0, ioreq->addr, ioreq->size);
-        } else {
-            assert(0);
-        }
+        DBG("IO request not WRITE. Doing nothing.\n");
     } else if (ioreq->dir == IOREQ_WRITE) {
         if (!ioreq->data_is_ptr) {
-            pci_bar_write(0, ioreq->addr, ioreq->size, (uint32_t)ioreq->data);
-        } else {
-            assert(0);
-        }
-    }
-}
-
-static void
-handle_copy(ioreq_t *ioreq)
-{
-    if (ioreq->dir == IOREQ_READ) {
-        if (!ioreq->data_is_ptr) {
-            ioreq->data = (uint64_t)pci_bar_read(1, ioreq->addr, ioreq->size);
-        } else {
-            assert(0);
-        }
-    } else if (ioreq->dir == IOREQ_WRITE) {
-        if (!ioreq->data_is_ptr) {
-            pci_bar_write(1, ioreq->addr, ioreq->size, (uint32_t)ioreq->data);
-        } else {
-            assert(0);
-        }
-    }
-}
-
-static void
-handle_pci_config(ioreq_t *ioreq)
-{
-    if (ioreq->dir == IOREQ_READ) {
-        if (!ioreq->data_is_ptr) {
-            ioreq->data = (uint32_t)pci_config_read(ioreq->addr, ioreq->size);
-        } else {
-            assert(0);
-        }
-    } else if (ioreq->dir == IOREQ_WRITE) {
-        if (!ioreq->data_is_ptr) {
-            pci_config_write(ioreq->addr, ioreq->size, (uint32_t)ioreq->data);
+            io_port_write(ioreq->addr, ioreq->size, (uint32_t)ioreq->data);
         } else {
             assert(0);
         }
@@ -293,11 +246,9 @@ handle_ioreq(ioreq_t *ioreq)
         break;
 
     case IOREQ_TYPE_COPY:
-        handle_copy(ioreq);
         break;
 
     case IOREQ_TYPE_PCI_CONFIG:
-        handle_pci_config(ioreq);
         break;
 
     case IOREQ_TYPE_TIMEOFFSET:
@@ -370,8 +321,8 @@ varstored_seq_next(void)
             varstored_state.buf_ioreq_local_port);
         break;
 
-    case VARSTORED_SEQ_DEVICE_INITIALIZED:
-        INFO(">DEVICE_INITIALIZED\n");
+    case VARSTORED_SEQ_PORT_INITIALIZED:
+        INFO(">PORT_INITIALIZED\n");
         break;
 
     case VARSTORED_SEQ_WROTE_PID:
@@ -416,12 +367,12 @@ varstored_teardown(void)
             fprintf(stderr, "Couldn't open xenstore");
         }
 
-        varstored_state.seq = VARSTORED_SEQ_DEVICE_INITIALIZED;
+        varstored_state.seq = VARSTORED_SEQ_PORT_INITIALIZED;
     }
 
-    if (varstored_state.seq == VARSTORED_SEQ_DEVICE_INITIALIZED) {
-        INFO("<DEVICE_INITIALIZED\n");
-        device_teardown();
+    if (varstored_state.seq == VARSTORED_SEQ_PORT_INITIALIZED) {
+        INFO("<PORT_INITIALIZED\n");
+        io_port_deregister();
 
         varstored_state.seq = VARSTORED_SEQ_PORTS_BOUND;
     }
@@ -540,12 +491,10 @@ varstored_sigusr1(int num)
     INFO("%s\n", strsignal(num));
 
     sigaction(SIGHUP, &sigusr1_handler, NULL);
-
-    pci_config_dump();
 }
 
 static int
-varstored_initialize(domid_t domid, unsigned int device, unsigned int function)
+varstored_initialize(domid_t domid)
 {
     int rc, i, subcount = 0, first = 1;
     uint64_t number = 0;
@@ -674,8 +623,9 @@ varstored_initialize(domid_t domid, unsigned int device, unsigned int function)
 
     varstored_seq_next();
 
-    rc = device_initialize(varstored_state.xch, varstored_state.domid,
-                           varstored_state.ioservid, 0, device, function);
+    rc = io_port_initialize(varstored_state.xch, varstored_state.domid,
+                            varstored_state.ioservid);
+
     if (rc < 0)
         goto fail12;
 
@@ -874,14 +824,10 @@ int
 main(int argc, char **argv, char **envp)
 {
     char            *domain_str;
-    char            *device_str;
-    char            *function_str;
     char            *ptr;
     int             index;
     char            *end;
     domid_t         domid;
-    unsigned int    device;
-    unsigned int    function;
     sigset_t        block;
     struct pollfd   pfd;
     int             rc;
@@ -889,8 +835,6 @@ main(int argc, char **argv, char **envp)
     prog = basename(argv[0]);
 
     domain_str = NULL;
-    device_str = NULL;
-    function_str = NULL;
 
     for (;;) {
         char    c;
@@ -909,14 +853,6 @@ main(int argc, char **argv, char **envp)
         switch (index) {
         case VARSTORED_OPT_DOMAIN:
             domain_str = optarg;
-            break;
-
-        case VARSTORED_OPT_DEVICE:
-            device_str = optarg;
-            break;
-
-        case VARSTORED_OPT_FUNCTION:
-            function_str = optarg;
             break;
 
         case VARSTORED_OPT_RESUME:
@@ -966,7 +902,6 @@ main(int argc, char **argv, char **envp)
     }
 
     if (domain_str == NULL ||
-        device_str == NULL ||
         db == NULL ||
         !db->check_args()) {
         usage();
@@ -977,22 +912,6 @@ main(int argc, char **argv, char **envp)
     if (*end != '\0') {
         fprintf(stderr, "invalid domain '%s'\n", domain_str);
         exit(1);
-    }
-
-    device = (unsigned int)strtol(device_str, &end, 0);
-    if (*end != '\0') {
-        fprintf(stderr, "invalid device number '%s'\n", device_str);
-        exit(1);
-    }
-
-    if (function_str != NULL) {
-        function = (unsigned int)strtol(function_str, &end, 0);
-        if (*end != '\0') {
-            fprintf(stderr, "invalid function number '%s'\n", function_str);
-            exit(1);
-        }
-    } else {
-        function = 0;
     }
 
     sigfillset(&block);
@@ -1020,7 +939,7 @@ main(int argc, char **argv, char **envp)
 
     sigprocmask(SIG_BLOCK, &block, NULL);
 
-    rc = varstored_initialize(domid, device, function);
+    rc = varstored_initialize(domid);
     if (rc < 0) {
         varstored_teardown();
         exit(1);

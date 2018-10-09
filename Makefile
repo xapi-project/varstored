@@ -1,9 +1,8 @@
 TARGET = varstored
 
-OBJS :=	device.o \
-	guid.o \
+OBJS :=	guid.o \
 	handler.o \
-	pci.o \
+	io_port.o \
 	varstored.o \
 	xapidb.o \
 	xapidb-lib.o

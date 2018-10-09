@@ -16,7 +16,6 @@
 #include <xapidb.h>
 
 #include "option.h"
-#include "pci.h"
 
 /* Path to the file used for resuming. */
 static char *arg_resume;
@@ -80,12 +79,6 @@ xapidb_save(void)
     }
     free(buf);
 
-    if (fwrite(pci_config_ptr(), 1, PCI_CONFIG_SIZE, f) != PCI_CONFIG_SIZE) {
-        DBG("Failed to write to '%s': %s\n", arg_save, strerror(errno));
-        fclose(f);
-        return false;
-    }
-
     fclose(f);
     return true;
 }
@@ -96,6 +89,7 @@ xapidb_resume(void)
     FILE *f;
     struct stat st;
     uint8_t *buf, *ptr;
+    bool ret;
 
     if (!arg_resume)
         return true;
@@ -128,15 +122,10 @@ xapidb_resume(void)
     fclose(f);
 
     ptr = buf;
-    if (!xapidb_parse_blob(&ptr, st.st_size)) {
-        free(buf);
-        return false;
-    }
-
-    pci_config_resume(ptr);
+    ret = xapidb_parse_blob(&ptr, st.st_size);
     free(buf);
 
-    return true;
+    return ret;
 }
 
 struct backend xapidb = {
