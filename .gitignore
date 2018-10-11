@@ -10,8 +10,8 @@ db.auth
 *.key
 PK.pem
 testPK.pem
-testPK2.pem
-testKey.pem
+testcertA.pem
+testcertB.pem
 varstore-get
 varstore-ls
 varstore-rm
