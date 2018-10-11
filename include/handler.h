@@ -21,6 +21,7 @@ enum command_t {
     COMMAND_SET_VARIABLE,
     COMMAND_GET_NEXT_VARIABLE,
     COMMAND_QUERY_VARIABLE_INFO,
+    COMMAND_NOTIFY_SB_FAILURE,
 };
 
 struct efi_variable {
