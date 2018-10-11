@@ -2,10 +2,6 @@
  * Copyright (C) Citrix Systems, Inc
  */
 
-/* Avoid logging anything */
-#define _DEBUG_H
-#define DBG(...)
-
 /* Including this directly allows us to poke into the implementation. */
 #include "handler.c"
 
@@ -14,6 +10,8 @@
 #include <assert.h>
 
 static char *save_name = "test.dat";
+
+enum log_level log_level = LOG_LVL_ERROR;
 
 /* The communication buffer. */
 static uint8_t buf[16 * 4096];
