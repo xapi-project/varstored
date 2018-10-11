@@ -88,7 +88,7 @@ static sig_atomic_t run_main_loop = 1;
 static const char *prog;
 struct backend *db;
 bool opt_resume;
-enum log_level log_level = LOG_LVL_DEBUG;
+enum log_level log_level = LOG_LVL_INFO;
 
 static void __attribute__((noreturn))
 usage(void)
@@ -158,9 +158,9 @@ initialize_settings(struct xs_handle *xsh, domid_t domid)
     s = xs_read(xsh, XBT_NULL, path, NULL);
     secure_boot_enable = s && !strcmp(s, "true");
     if (secure_boot_enable)
-        DBG("SECURE_BOOT_ON\n");
+        INFO("SECURE_BOOT_ON\n");
     else
-        DBG("SECURE_BOOT_OFF\n");
+        INFO("SECURE_BOOT_OFF\n");
     free(s);
 
     snprintf(path, sizeof(path),
@@ -170,8 +170,8 @@ initialize_settings(struct xs_handle *xsh, domid_t domid)
     auth_enforce = !s || strcmp(s, "false");
     free(s);
 
-    DBG("Authenticated variables: %s\n",
-        auth_enforce ? "enforcing" : "permissive");
+    INFO("Authenticated variables: %s\n",
+         auth_enforce ? "enforcing" : "permissive");
 }
 
 static bool
@@ -307,7 +307,7 @@ handle_ioreq(ioreq_t *ioreq)
         break;
 
     default:
-        DBG("UNKNOWN (%02x)", ioreq->type);
+        ERR("UNKNOWN (%02x)", ioreq->type);
         break;
     }
 }
@@ -319,43 +319,43 @@ varstored_seq_next(void)
 
     switch (++varstored_state.seq) {
     case VARSTORED_SEQ_INTERFACE_OPEN:
-        DBG(">INTERFACE_OPEN\n");
+        INFO(">INTERFACE_OPEN\n");
         break;
 
     case VARSTORED_SEQ_SERVER_REGISTERED:
-        DBG(">SERVER_REGISTERED\n");
-        DBG("ioservid = %u\n", varstored_state.ioservid);
+        INFO(">SERVER_REGISTERED\n");
+        INFO("ioservid = %u\n", varstored_state.ioservid);
         break;
 
     case VARSTORED_SEQ_SHARED_IOPAGE_MAPPED:
-        DBG(">SHARED_IOPAGE_MAPPED\n");
-        DBG("iopage = %p\n", varstored_state.iopage);
+        INFO(">SHARED_IOPAGE_MAPPED\n");
+        INFO("iopage = %p\n", varstored_state.iopage);
         break;
 
     case VARSTORED_SEQ_BUFFERED_IOPAGE_MAPPED:
-        DBG(">BUFFERED_IOPAGE_MAPPED\n");
-        DBG("buffered_iopage = %p\n", varstored_state.buffered_iopage);
+        INFO(">BUFFERED_IOPAGE_MAPPED\n");
+        INFO("buffered_iopage = %p\n", varstored_state.buffered_iopage);
         break;
 
     case VARSTORED_SEQ_SERVER_ENABLED:
-        DBG(">SERVER_ENABLED\n");
+        INFO(">SERVER_ENABLED\n");
         break;
 
     case VARSTORED_SEQ_PORT_ARRAY_ALLOCATED:
-        DBG(">PORT_ARRAY_ALLOCATED\n");
+        INFO(">PORT_ARRAY_ALLOCATED\n");
         break;
 
     case VARSTORED_SEQ_EVTCHN_OPEN:
-        DBG(">EVTCHN_OPEN\n");
+        INFO(">EVTCHN_OPEN\n");
         break;
 
     case VARSTORED_SEQ_PORTS_BOUND: {
         int i;
 
-        DBG(">EVTCHN_PORTS_BOUND\n");
+        INFO(">EVTCHN_PORTS_BOUND\n");
 
         for (i = 0; i < varstored_state.vcpus; i++)
-            DBG("VCPU%d: %u -> %u\n", i,
+            INFO("VCPU%d: %u -> %u\n", i,
                 varstored_state.iopage->vcpu_ioreq[i].vp_eport,
                 varstored_state.ioreq_local_port[i]);
 
@@ -363,23 +363,23 @@ varstored_seq_next(void)
     }
 
     case VARSTORED_SEQ_BUF_PORT_BOUND:
-        DBG(">EVTCHN_BUF_PORT_BOUND\n");
+        INFO(">EVTCHN_BUF_PORT_BOUND\n");
 
-        DBG("%u -> %u\n",
+        INFO("%u -> %u\n",
             varstored_state.buf_ioreq_port,
             varstored_state.buf_ioreq_local_port);
         break;
 
     case VARSTORED_SEQ_DEVICE_INITIALIZED:
-        DBG(">DEVICE_INITIALIZED\n");
+        INFO(">DEVICE_INITIALIZED\n");
         break;
 
     case VARSTORED_SEQ_WROTE_PID:
-        DBG(">WROTE_PID\n");
+        INFO(">WROTE_PID\n");
         break;
 
     case VARSTORED_SEQ_INITIALIZED:
-        DBG(">INITIALIZED\n");
+        INFO(">INITIALIZED\n");
         break;
 
     default:
@@ -392,7 +392,7 @@ static void
 varstored_teardown(void)
 {
     if (varstored_state.seq == VARSTORED_SEQ_INITIALIZED) {
-        DBG("<INITIALIZED\n");
+        INFO("<INITIALIZED\n");
 
         varstored_state.seq = VARSTORED_SEQ_WROTE_PID;
     }
@@ -401,7 +401,7 @@ varstored_teardown(void)
         char *key;
         struct xs_handle *xsh;
 
-        DBG("<WROTE_PID\n");
+        INFO("<WROTE_PID\n");
 
         xsh = xs_open(0);
         if (xsh) {
@@ -409,7 +409,7 @@ varstored_teardown(void)
                 xs_rm(xsh, 0, key);
                 free(key);
             } else {
-                DBG("Couldn't remove varstore pid from xenstore\n");
+                INFO("Couldn't remove varstore pid from xenstore\n");
             }
             xs_close(xsh);
         } else {
@@ -420,26 +420,26 @@ varstored_teardown(void)
     }
 
     if (varstored_state.seq == VARSTORED_SEQ_DEVICE_INITIALIZED) {
-        DBG("<DEVICE_INITIALIZED\n");
+        INFO("<DEVICE_INITIALIZED\n");
         device_teardown();
 
         varstored_state.seq = VARSTORED_SEQ_PORTS_BOUND;
     }
 
     if (varstored_state.seq >= VARSTORED_SEQ_PORTS_BOUND) {
-        DBG("<EVTCHN_BUF_PORT_BOUND\n");
+        INFO("<EVTCHN_BUF_PORT_BOUND\n");
         evtchn_port_t   port;
 
         port = varstored_state.buf_ioreq_local_port;
 
-        DBG("%u\n", port);
+        INFO("%u\n", port);
         (void) xc_evtchn_unbind(varstored_state.xceh, port);
 
         varstored_state.seq = VARSTORED_SEQ_PORTS_BOUND;
     }
 
     if (varstored_state.seq >= VARSTORED_SEQ_PORTS_BOUND) {
-        DBG("<EVTCHN_PORTS_BOUND\n");
+        INFO("<EVTCHN_PORTS_BOUND\n");
 
         varstored_state.seq = VARSTORED_SEQ_EVTCHN_OPEN;
     }
@@ -447,7 +447,7 @@ varstored_teardown(void)
     if (varstored_state.seq >= VARSTORED_SEQ_EVTCHN_OPEN) {
         int i;
 
-        DBG("<EVTCHN_OPEN\n");
+        INFO("<EVTCHN_OPEN\n");
 
         for (i = 0; i < varstored_state.vcpus; i++) {
             evtchn_port_t   port;
@@ -455,7 +455,7 @@ varstored_teardown(void)
             port = varstored_state.ioreq_local_port[i];
 
             if (port >= 0) {
-                DBG("VCPU%d: %u\n", i, port);
+                INFO("VCPU%d: %u\n", i, port);
                 (void) xc_evtchn_unbind(varstored_state.xceh, port);
             }
         }
@@ -466,7 +466,7 @@ varstored_teardown(void)
     }
 
     if (varstored_state.seq >= VARSTORED_SEQ_PORT_ARRAY_ALLOCATED) {
-        DBG("<PORT_ARRAY_ALLOCATED\n");
+        INFO("<PORT_ARRAY_ALLOCATED\n");
 
         free(varstored_state.ioreq_local_port);
 
@@ -474,7 +474,7 @@ varstored_teardown(void)
     }
 
     if (varstored_state.seq == VARSTORED_SEQ_SERVER_ENABLED) {
-        DBG("<SERVER_ENABLED\n");
+        INFO("<SERVER_ENABLED\n");
         (void) xc_hvm_set_ioreq_server_state(varstored_state.xch,
                                              varstored_state.domid,
                                              varstored_state.ioservid,
@@ -484,7 +484,7 @@ varstored_teardown(void)
     }
 
     if (varstored_state.seq >= VARSTORED_SEQ_BUFFERED_IOPAGE_MAPPED) {
-        DBG("<BUFFERED_IOPAGE_MAPPED\n");
+        INFO("<BUFFERED_IOPAGE_MAPPED\n");
 
         munmap(varstored_state.buffered_iopage, XC_PAGE_SIZE);
 
@@ -492,7 +492,7 @@ varstored_teardown(void)
     }
 
     if (varstored_state.seq >= VARSTORED_SEQ_SHARED_IOPAGE_MAPPED) {
-        DBG("<SHARED_IOPAGE_MAPPED\n");
+        INFO("<SHARED_IOPAGE_MAPPED\n");
 
         munmap(varstored_state.iopage, XC_PAGE_SIZE);
 
@@ -500,7 +500,7 @@ varstored_teardown(void)
     }
 
     if (varstored_state.seq >= VARSTORED_SEQ_SERVER_REGISTERED) {
-        DBG("<SERVER_REGISTERED\n");
+        INFO("<SERVER_REGISTERED\n");
 
         (void) xc_hvm_destroy_ioreq_server(varstored_state.xch,
                                            varstored_state.domid,
@@ -509,7 +509,7 @@ varstored_teardown(void)
     }
 
     if (varstored_state.seq >= VARSTORED_SEQ_INTERFACE_OPEN) {
-        DBG("<INTERFACE_OPEN\n");
+        INFO("<INTERFACE_OPEN\n");
 
         xc_interface_close(varstored_state.xch);
 
@@ -522,7 +522,7 @@ static struct sigaction sigterm_handler;
 static void
 varstored_sigterm(int num)
 {
-    DBG("%s\n", strsignal(num));
+    INFO("%s\n", strsignal(num));
 
     varstored_teardown();
 
@@ -537,7 +537,7 @@ static struct sigaction sigusr1_handler;
 static void
 varstored_sigusr1(int num)
 {
-    DBG("%s\n", strsignal(num));
+    INFO("%s\n", strsignal(num));
 
     sigaction(SIGHUP, &sigusr1_handler, NULL);
 
@@ -570,24 +570,24 @@ varstored_initialize(domid_t domid, unsigned int device, unsigned int function)
 
     varstored_state.vcpus = dominfo.max_vcpu_id + 1;
 
-    DBG("%d vCPU(s)\n", varstored_state.vcpus);
+    INFO("%d vCPU(s)\n", varstored_state.vcpus);
 
     do {
         rc = xc_hvm_param_get(varstored_state.xch, varstored_state.domid,
                               HVM_PARAM_NR_IOREQ_SERVER_PAGES, &number);
 
         if (rc < 0) {
-            DBG("xc_hvm_param_get failed: %d, %s", errno, strerror(errno));
+            ERR("xc_hvm_param_get failed: %d, %s", errno, strerror(errno));
             exit(1);
         }
 
         if (first || number > 0)
-            DBG("HVM_PARAM_NR_IOREQ_SERVER_PAGES = %ld\n", number);
+            INFO("HVM_PARAM_NR_IOREQ_SERVER_PAGES = %ld\n", number);
         first = 0;
 
         if (number == 0) {
             if (!subcount)
-                DBG("Waiting for ioreq server");
+                INFO("Waiting for ioreq server");
             usleep(100000);
             subcount++;
             if (subcount > 10)
@@ -721,43 +721,43 @@ varstored_initialize(domid_t domid, unsigned int device, unsigned int function)
 
 fail13:
     xs_close(xsh);
-    DBG("fail13\n");
+    ERR("fail13\n");
 
 fail12:
-    DBG("fail12\n");
+    ERR("fail12\n");
 
 fail11:
-    DBG("fail11\n");
+    ERR("fail11\n");
 
 fail10:
-    DBG("fail10\n");
+    ERR("fail10\n");
 
 fail9:
-    DBG("fail9\n");
+    ERR("fail9\n");
 
 fail8:
-    DBG("fail8\n");
+    ERR("fail8\n");
 
 fail7:
-    DBG("fail7\n");
+    ERR("fail7\n");
 
 fail6:
-    DBG("fail6\n");
+    ERR("fail6\n");
 
 fail5:
-    DBG("fail5\n");
+    ERR("fail5\n");
 
 fail4:
-    DBG("fail4\n");
+    ERR("fail4\n");
 
 fail3:
-    DBG("fail3\n");
+    ERR("fail3\n");
 
 fail2:
-    DBG("fail2\n");
+    ERR("fail2\n");
 
 fail1:
-    DBG("fail1\n");
+    ERR("fail1\n");
 
     warn("fail");
     return -1;
@@ -904,7 +904,7 @@ main(int argc, char **argv, char **envp)
             /*NOTREACHED*/
         }
 
-        DBG("--%s = '%s'\n", varstored_option[index].name, optarg);
+        INFO("--%s = '%s'\n", varstored_option[index].name, optarg);
 
         switch (index) {
         case VARSTORED_OPT_DOMAIN:
