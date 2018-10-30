@@ -584,6 +584,7 @@ pkcs7_get_signers(const uint8_t *p7data, UINTN p7_len,
 
     if (!PKCS7_type_is_signed(*pkcs7)) {
         PKCS7_free(*pkcs7);
+        *pkcs7 = NULL;
         status = EFI_SECURITY_VIOLATION;
         goto out;
     }
@@ -591,6 +592,7 @@ pkcs7_get_signers(const uint8_t *p7data, UINTN p7_len,
     *certs = PKCS7_get0_signers(*pkcs7, NULL, PKCS7_BINARY);
     if (!*certs) {
         PKCS7_free(*pkcs7);
+        *pkcs7 = NULL;
         status = EFI_SECURITY_VIOLATION;
         goto out;
     }
