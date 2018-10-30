@@ -130,10 +130,10 @@ typedef struct varstored_state {
     unsigned int        vcpus;
     ioservid_t          ioservid;
     shared_iopage_t     *iopage;
-    evtchn_port_t       *ioreq_local_port;
-    buffered_iopage_t   *buffered_iopage;
-    evtchn_port_t       buf_ioreq_port;
-    evtchn_port_t       buf_ioreq_local_port;
+    evtchn_port_or_error_t   *ioreq_local_port;
+    buffered_iopage_t        *buffered_iopage;
+    evtchn_port_or_error_t   buf_ioreq_port;
+    evtchn_port_or_error_t   buf_ioreq_local_port;
 } varstored_state_t;
 
 static varstored_state_t varstored_state;
@@ -379,11 +379,11 @@ varstored_teardown(void)
 
     if (varstored_state.seq >= VARSTORED_SEQ_PORTS_BOUND) {
         INFO("<EVTCHN_BUF_PORT_BOUND\n");
-        evtchn_port_t   port;
+        evtchn_port_or_error_t   port;
 
         port = varstored_state.buf_ioreq_local_port;
 
-        INFO("%u\n", port);
+        INFO("%d\n", port);
         (void) xc_evtchn_unbind(varstored_state.xceh, port);
 
         varstored_state.seq = VARSTORED_SEQ_PORTS_BOUND;
@@ -401,12 +401,10 @@ varstored_teardown(void)
         INFO("<EVTCHN_OPEN\n");
 
         for (i = 0; i < varstored_state.vcpus; i++) {
-            evtchn_port_t   port;
-
-            port = varstored_state.ioreq_local_port[i];
+            evtchn_port_or_error_t port = varstored_state.ioreq_local_port[i];
 
             if (port >= 0) {
-                INFO("VCPU%d: %u\n", i, port);
+                INFO("VCPU%d: %d\n", i, port);
                 (void) xc_evtchn_unbind(varstored_state.xceh, port);
             }
         }
@@ -585,7 +583,7 @@ varstored_initialize(domid_t domid)
 
     varstored_seq_next();
 
-    varstored_state.ioreq_local_port = malloc(sizeof (evtchn_port_t) *
+    varstored_state.ioreq_local_port = malloc(sizeof (evtchn_port_or_error_t) *
                                          varstored_state.vcpus);
     if (varstored_state.ioreq_local_port == NULL)
         goto fail8;
@@ -797,8 +795,8 @@ varstored_poll_iopage(unsigned int i)
 static void
 varstored_poll_iopages(void)
 {
-    evtchn_port_t   port;
-    int             i;
+    evtchn_port_or_error_t   port;
+    int                      i;
 
     if (varstored_state.seq != VARSTORED_SEQ_INITIALIZED)
         return;

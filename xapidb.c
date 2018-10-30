@@ -69,6 +69,7 @@ xapidb_save(void)
     f = fopen(arg_save, "w");
     if (!f) {
         DBG("Failed to open '%s'\n", arg_save);
+        free(buf);
         return false;
     }
     if (fwrite(buf, 1, len, f) != len) {

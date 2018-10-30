@@ -1241,9 +1241,8 @@ filter_signature_list(uint8_t *data, UINTN data_len,
                             is_new_cert = false;
                             break;
                         }
+                        old_cert = (EFI_SIGNATURE_DATA *)((uint8_t *)old_cert + old_cert_list->SignatureSize);
                     }
-                    old_cert = (EFI_SIGNATURE_DATA *)((uint8_t *)old_cert +
-                               old_cert_list->SignatureSize);
                 }
                 if (!is_new_cert)
                     break;
@@ -1953,6 +1952,7 @@ set_variable_from_auth(uint8_t *name, UINTN name_len, EFI_GUID *guid,
     if (fread(data, 1, st.st_size, f) != st.st_size) {
         DBG("Failed to read '%s'\n", path);
         fclose(f);
+        free(data);
         return false;
     }
     fclose(f);

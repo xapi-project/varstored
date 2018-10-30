@@ -327,6 +327,10 @@ int main(int argc, char **argv)
     descriptor = (uint8_t *)create_descriptor(sig_len, &timestamp, &descriptor_len);
 
     out = fopen(out_file, "w");
+    if (!out) {
+        printf("Failed to open '%s'\n", out_file);
+        exit(1);
+    }
     if (fwrite(descriptor, 1, descriptor_len, out) != descriptor_len) {
         printf("Failed to write!\n");
         exit(1);

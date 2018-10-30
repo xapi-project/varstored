@@ -406,6 +406,12 @@ base64_encode(const uint8_t *buf, size_t len, char **out)
     }
 
     BIO_flush(b64);
+
+    if (total != len) {
+        BIO_free_all(b64);
+        return false;
+    }
+
     out_len = BIO_get_mem_data(b64, &ptr);
     *out = malloc(out_len + 1);
     if (!*out) {
@@ -417,7 +423,7 @@ base64_encode(const uint8_t *buf, size_t len, char **out)
 
     BIO_free_all(b64);
 
-    return total == len ? true : false;
+    return true;
 }
 
 bool
