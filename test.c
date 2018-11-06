@@ -144,7 +144,7 @@ static dstring *alloc_dstring_unset(size_t length)
     dstring *dstr = malloc(sizeof(dstring));
     assert(dstr);
     dstr->length = length;
-    dstr->data = malloc(length * sizeof(uint16_t));
+    dstr->data = calloc(length, sizeof(uint16_t));
     assert(dstr->data);
     return dstr;
 }
