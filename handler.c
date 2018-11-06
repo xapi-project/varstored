@@ -188,6 +188,8 @@ internal_get_variable(const uint8_t *name, UINTN name_len, EFI_GUID *guid,
                 !memcmp(&l->guid, guid, GUID_LEN)) {
 
             *data = malloc(l->data_len);
+            if (!*data)
+                return EFI_DEVICE_ERROR;
             memcpy(*data, l->data, l->data_len);
             *data_len = l->data_len;
             return EFI_SUCCESS;
