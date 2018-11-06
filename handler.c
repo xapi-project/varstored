@@ -1945,6 +1945,16 @@ set_variable_from_auth(uint8_t *name, UINTN name_len, EFI_GUID *guid,
         return false;
     }
 
+    /*
+     * This will be checked later during SetVariable but check it now to avoid
+     * reading a malicously large file into memory.
+     */
+    if (st.st_size > DATA_LIMIT) {
+        DBG("Auth file '%s' is too large: %ld\n", path, st.st_size);
+        fclose(f);
+        return false;
+    }
+
     data = malloc(st.st_size);
     if (!data) {
         DBG("Out of memory!\n");
