@@ -1630,7 +1630,7 @@ static void set_usermode()
                    &sign_testPK, EFI_SUCCESS);
 }
 
-__attribute__((unused)) static void test_use_bad_digest(void)
+static void test_use_bad_digest(void)
 {
     /*
      * Attempt bad digest
@@ -1644,7 +1644,7 @@ __attribute__((unused)) static void test_use_bad_digest(void)
     setup_variables();
 
     sign_and_check(tname1, &tguid1, ATTR_B_TIME, &test_timea, tdata1,
-                   sizeof(tdata1), &sign_bad_digest, EFI_INVALID_PARAMETER);
+                   sizeof(tdata1), &sign_bad_digest, EFI_SECURITY_VIOLATION);
 }
 
 static void test_set_secure_variable(void)
@@ -2376,13 +2376,8 @@ int main(int argc, char **argv)
     g_test_add_func("/test/set_variable/non_volatile",
                     test_set_variable_non_volatile);
 
-    /*
-     * TODO: This test fails, and should be fixed
-     *
-     *  g_test_add_func("/test/secure_set_variable/use_bad_digest",
-     *                 test_use_bad_digest);
-     */
-
+    g_test_add_func("/test/secure_set_variable/use_bad_digest",
+                    test_use_bad_digest);
     g_test_add_func("/test/secure_set_variable/setupmode",
                     test_secure_set_variable_setupmode);
     g_test_add_func("/test/secure_set_variable/PK",

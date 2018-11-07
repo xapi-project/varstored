@@ -69,6 +69,7 @@ uint8_t mSignatureSupport[] = {
     0xa1,0x59,0xc0,0xa5,0xe4,0x94,0xa7,0x4a,0x87,0xb5,0xab,0x15,0x5c,0x2b,0xf0,0x72, /* EFI_CERT_X509_GUID */
 };
 
+const uint8_t mSha256OidValue[] = {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01};
 EFI_SIGNATURE_ITEM mSupportSigItem[] = {
     {{{0x26, 0x16, 0xc4, 0xc1, 0x4c, 0x50, 0x92, 0x40, 0xac, 0xa9, 0x41, 0xf9, 0x36, 0x93, 0x43, 0x28}}, 0, 32           }, /* EFI_CERT_SHA256_GUID */
     {{{0xe8, 0x66, 0x57, 0x3c, 0x9c, 0x26, 0x34, 0x4e, 0xaa, 0x14, 0xed, 0x77, 0x6e, 0x85, 0xb3, 0xb6}}, 0, 256          }, /* EFI_CERT_RSA2048_GUID */
@@ -425,26 +426,40 @@ X509_verify_cb(int status, X509_STORE_CTX *context)
 }
 
 /*
- * Check whether input p7data is a wrapped ContentInfo structure or not.
- * Wrap it if needed. Adapted from edk2.
- * The caller must free wrap_data if wrapped is true.
+ * Check whether input p7data is a wrapped ContentInfo structure or not. Wrap
+ * it if needed. While the specification seems to indicate that it should not
+ * be wrapped (i.e. it should just be signed data), edk2 accepts either and at
+ * least one existing tool signs SetVariable updates with a wrapped structure.
+ * Adapted from edk2. This function contains several magic numbers since it is
+ * parsing DER-encoded PKCS #7 ASN.1 object by hand. The caller must free
+ * wrap_data on success.
  */
 static EFI_STATUS
-wrap_pkcs7_data(const uint8_t *p7data, UINTN p7_len, bool *wrapped,
+wrap_pkcs7_data(const uint8_t *p7data, UINTN p7_len,
                 uint8_t **wrap_data, UINTN *wrap_len)
 {
     uint8_t *sig_data;
 
+    /*
+     * We need to look at the first 17 bytes to determine whether the input
+     * data is wrapped or not. The length needs to be at least this long in
+     * either case so check and bail early if needed.
+     */
+    if (p7_len < 17) {
+        return EFI_SECURITY_VIOLATION;
+    }
+
     if ((p7data[4] == 0x06) && (p7data[5] == 0x09) &&
             !memcmp(p7data + 6, mOidValue, sizeof(mOidValue)) &&
-            (p7data[15] == 0xA0) && (p7data[16] == 0x82)) {
-        *wrapped = true;
-        *wrap_data = (uint8_t *)p7data;
+            (p7data[15] == 0xa0) && (p7data[16] == 0x82)) {
+        *wrap_data = malloc(p7_len);
+        if (!*wrap_data)
+            return EFI_DEVICE_ERROR;
+        memcpy(*wrap_data, p7data, p7_len);
         *wrap_len = p7_len;
         return EFI_SUCCESS;
     }
 
-    *wrapped = false;
     *wrap_len = p7_len + 19;
     *wrap_data = malloc(*wrap_len);
     if (!*wrap_data)
@@ -472,36 +487,17 @@ wrap_pkcs7_data(const uint8_t *p7data, UINTN p7_len, bool *wrapped,
  * Adapted from edk2.
  */
 static EFI_STATUS
-pkcs7_verify(uint8_t *p7data, UINTN p7_len, X509 *trusted_cert,
+pkcs7_verify(const uint8_t *p7data, UINTN p7_len, X509 *trusted_cert,
              uint8_t *verify_buf, UINTN verify_len)
 {
     EFI_STATUS status;
-    bool wrapped;
-    uint8_t *ptr, *sig;
-    UINTN sig_len;
+    const uint8_t *ptr;
     PKCS7 *pkcs7 = NULL;
     BIO *data_bio = NULL;
     X509_STORE *cert_store = NULL;
 
-    if (!EVP_add_digest(EVP_md5()))
-        return EFI_DEVICE_ERROR;
-    if (!EVP_add_digest(EVP_sha1()))
-        return EFI_DEVICE_ERROR;
-    if (!EVP_add_digest(EVP_sha256()))
-        return EFI_DEVICE_ERROR;
-    if (!EVP_add_digest(EVP_sha384()))
-        return EFI_DEVICE_ERROR;
-    if (!EVP_add_digest(EVP_sha512()))
-        return EFI_DEVICE_ERROR;
-    if (!EVP_add_digest_alias(SN_sha1WithRSAEncryption, SN_sha1WithRSA))
-        return EFI_DEVICE_ERROR;
-
-    status = wrap_pkcs7_data(p7data, p7_len, &wrapped, &sig, &sig_len);
-    if (EFI_ERROR(status))
-        goto out;
-
-    ptr = sig;
-    pkcs7 = d2i_PKCS7(NULL, (const unsigned char **)&ptr, (int)sig_len);
+    ptr = p7data;
+    pkcs7 = d2i_PKCS7(NULL, &ptr, (int)p7_len);
     if (!pkcs7) {
         status = EFI_SECURITY_VIOLATION;
         goto out;
@@ -542,8 +538,11 @@ pkcs7_verify(uint8_t *p7data, UINTN p7_len, X509 *trusted_cert,
     if (PKCS7_verify(pkcs7, NULL, cert_store, data_bio, NULL, PKCS7_BINARY))
         status = EFI_SUCCESS;
     else {
-        ERR_load_crypto_strings();
-        DBG("verify_error : %s\n", ERR_error_string(ERR_get_error(), NULL));
+        if (log_level >= LOG_LVL_DEBUG) {
+            ERR_load_crypto_strings();
+            DBG("verify_error : %s\n", ERR_error_string(ERR_get_error(), NULL));
+            ERR_free_strings();
+        }
         status = EFI_SECURITY_VIOLATION;
     }
 
@@ -551,8 +550,6 @@ out:
     BIO_free(data_bio);
     X509_STORE_free(cert_store);
     PKCS7_free(pkcs7);
-    if (!wrapped)
-        free(sig);
     return status;
 }
 
@@ -568,43 +565,27 @@ static EFI_STATUS
 pkcs7_get_signers(const uint8_t *p7data, UINTN p7_len,
                   PKCS7 **pkcs7, STACK_OF(X509) **certs)
 {
-    bool wrapped;
-    uint8_t *ptr, *sig;
-    UINTN sig_len;
-    EFI_STATUS status;
+    const uint8_t *ptr;
 
-    status = wrap_pkcs7_data(p7data, p7_len, &wrapped, &sig, &sig_len);
-    if (EFI_ERROR(status))
-        goto out;
-
-    ptr = sig;
-    *pkcs7 = d2i_PKCS7(NULL, (const unsigned char **)&ptr, (int)sig_len);
-    if (!*pkcs7) {
-        status = EFI_SECURITY_VIOLATION;
-        goto out;
-    }
+    ptr = p7data;
+    *pkcs7 = d2i_PKCS7(NULL, &ptr, (int)p7_len);
+    if (!*pkcs7)
+        return EFI_SECURITY_VIOLATION;
 
     if (!PKCS7_type_is_signed(*pkcs7)) {
         PKCS7_free(*pkcs7);
         *pkcs7 = NULL;
-        status = EFI_SECURITY_VIOLATION;
-        goto out;
+        return EFI_SECURITY_VIOLATION;
     }
 
     *certs = PKCS7_get0_signers(*pkcs7, NULL, PKCS7_BINARY);
     if (!*certs) {
         PKCS7_free(*pkcs7);
         *pkcs7 = NULL;
-        status = EFI_SECURITY_VIOLATION;
-        goto out;
+        return EFI_SECURITY_VIOLATION;
     }
 
-    status = EFI_SUCCESS;
-
-out:
-    if (!wrapped)
-        free(sig);
-    return status;
+    return EFI_SUCCESS;
 }
 
 /* Returns true iff b is later than a */
@@ -761,7 +742,7 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
                      uint8_t **payload_out, UINTN *payload_len_out,
                      uint8_t *digest, EFI_TIME *timestamp)
 {
-    uint8_t *ptr, *sig, *payload, *verify_buf = NULL, *tlc_buf = NULL;
+    uint8_t *ptr, *sig = NULL, *payload, *verify_buf = NULL, *tlc_buf = NULL;
     uint8_t *var_data = NULL;
     EFI_VARIABLE_AUTHENTICATION_2 *d;
     UINTN sig_len, verify_len, payload_len, var_len;
@@ -794,11 +775,32 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
     sig_len = d->AuthInfo.Hdr.dwLength - offsetof(WIN_CERTIFICATE_UEFI_GUID, CertData);
     if (sig_len > (data_len - offsetof(EFI_VARIABLE_AUTHENTICATION_2, AuthInfo.CertData)))
         return EFI_SECURITY_VIOLATION;
-    /* XXX check for msha256OidValue */
-    sig = d->AuthInfo.CertData;
 
-    payload = sig + sig_len;
+    payload = d->AuthInfo.CertData + sig_len;
     payload_len = data_len - offsetof(EFI_VARIABLE_AUTHENTICATION_2, AuthInfo) - d->AuthInfo.Hdr.dwLength;
+
+    if (auth_type == AUTH_TYPE_NONE) {
+        sig = malloc(sig_len);
+        if (!sig)
+            return EFI_DEVICE_ERROR;
+        memcpy(sig, d->AuthInfo.CertData, sig_len);
+    } else {
+        status = wrap_pkcs7_data(d->AuthInfo.CertData, sig_len, &sig, &sig_len);
+        if (status != EFI_SUCCESS)
+            goto out;
+
+        /*
+         * Verify that the signature uses a digest algorithm of SHA-256 as
+         * required by the specification.  Assumes that two-byte length
+         * encoding has been used. Adapted from edk2.
+         */
+        if (sig_len >= (32 + sizeof(mSha256OidValue)) &&
+                ((sig[20] != 0x82) ||
+                 memcmp(sig + 32, &mSha256OidValue, sizeof(mSha256OidValue)))) {
+            status = EFI_SECURITY_VIOLATION;
+            goto out;
+        }
+    }
 
     /* VariableName, VendorGuid, Attributes, TimeStamp, Data */
     verify_len = name_len + GUID_LEN + sizeof(UINT32) + sizeof(EFI_TIME) +
@@ -828,6 +830,10 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
         status = pkcs7_get_signers(sig, sig_len, &pkcs7, &certs);
         if (status != EFI_SUCCESS)
             goto out;
+        if (sk_X509_num(certs) == 0) {
+            status = EFI_SECURITY_VIOLATION;
+            goto out;
+        }
         top_level_cert = sk_X509_value(certs, sk_X509_num(certs) - 1);
 
         tlc_buf = X509_to_buf(top_level_cert, &tlc_len);
@@ -848,8 +854,8 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
         cert_list = (EFI_SIGNATURE_LIST *)var_data;
         cert = (EFI_SIGNATURE_DATA *)((uint8_t *)cert_list +
                sizeof(EFI_SIGNATURE_LIST) + cert_list->SignatureHeaderSize);
-        if ((tlc_len != (cert_list->SignatureSize - (sizeof(EFI_SIGNATURE_DATA) - 1))) ||
-            memcmp(cert->SignatureData, tlc_buf, tlc_len)) {
+        if ((tlc_len != (cert_list->SignatureSize - EFI_SIG_DATA_SIZE)) ||
+                memcmp(cert->SignatureData, tlc_buf, tlc_len)) {
             status = EFI_SECURITY_VIOLATION;
             goto out;
         }
@@ -880,8 +886,12 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
         }
 
         remaining = (UINT32)var_len;
+        /*
+         * cert_list (i.e. the contents of KEK) was verified to be valid when
+         * it was written. Therefore no checking of validity is needed here.
+         */
         cert_list = (EFI_SIGNATURE_LIST *)var_data;
-        while ((remaining > 0) && (remaining >= cert_list->SignatureListSize)) {
+        while (remaining > 0) {
             if (!memcmp(&cert_list->SignatureType, &gEfiCertX509Guid, GUID_LEN)) {
                 cert = (EFI_SIGNATURE_DATA *)((uint8_t *)cert_list +
                        sizeof(EFI_SIGNATURE_LIST) + cert_list->SignatureHeaderSize);
@@ -889,10 +899,6 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
                           cert_list->SignatureHeaderSize) / cert_list->SignatureSize;
 
                 for (i = 0; i < count; i++) {
-                    if (cert_list->SignatureSize < EFI_SIG_DATA_SIZE) {
-                        status = EFI_SECURITY_VIOLATION;
-                        goto out;
-                    }
                     trusted_cert = X509_from_buf(cert->SignatureData,
                         cert_list->SignatureSize - EFI_SIG_DATA_SIZE);
                     if (trusted_cert) {
@@ -965,6 +971,10 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
         status = pkcs7_get_signers(sig, sig_len, &pkcs7, &certs);
         if (status != EFI_SUCCESS)
             goto out;
+        if (sk_X509_num(certs) == 0) {
+            status = EFI_SECURITY_VIOLATION;
+            goto out;
+        }
         top_level_cert = sk_X509_value(certs, sk_X509_num(certs) - 1);
 
         status = sha256_sig(certs, top_level_cert, digest);
@@ -1006,6 +1016,7 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
     }
 
 out:
+    free(sig);
     free(var_data);
     free(tlc_buf);
     free(verify_buf);
@@ -1903,6 +1914,9 @@ setup_variables(void)
     uint8_t setup_mode = 0;
     uint8_t *data;
     uint8_t secure_boot = 0, deployed_mode = 0, audit_mode = 0;
+
+    if (!EVP_add_digest(EVP_sha256()))
+        return false;
 
     status = internal_set_variable(EFI_SIGNATURE_SUPPORT_NAME,
                                    sizeof(EFI_SIGNATURE_SUPPORT_NAME),
