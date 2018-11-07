@@ -690,6 +690,10 @@ check_signature_list_format(uint8_t *name, UINTN name_len,
 
         list_items = list_body_size / sig_list->SignatureSize;
 
+        /* Don't allow signature lists with no items in it. */
+        if (list_items == 0)
+            return EFI_INVALID_PARAMETER;
+
         if (!memcmp(&sig_list->SignatureType, &gEfiCertX509Guid, GUID_LEN)) {
             UINTN cert_len;
             X509 *cert;
