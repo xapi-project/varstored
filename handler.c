@@ -527,7 +527,7 @@ pkcs7_verify(const uint8_t *p7data, UINTN p7_len, X509 *trusted_cert,
         goto out;
     }
 
-    if (BIO_write(data_bio, verify_buf, (int)verify_len) <= 0) {
+    if (BIO_write(data_bio, verify_buf, (int)verify_len) != verify_len) {
         status = EFI_SECURITY_VIOLATION;
         goto out;
     }
