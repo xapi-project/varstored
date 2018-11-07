@@ -1764,6 +1764,7 @@ static void test_secure_set_PK()
     EFI_SIGNATURE_LIST *joint_cert;
     size_t joint_len;
     uint8_t *ptr;
+    size_t i;
 
     reset_vars();
     setup_variables();
@@ -1831,14 +1832,35 @@ static void test_secure_set_PK()
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
 
-    /* new cert, truncated */
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
-                   &test_timeb, (uint8_t *)certB, certB_len - 8,
-                   &sign_testPK, EFI_INVALID_PARAMETER);
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
-                        BSIZ, 0, (uint8_t *)"\0", 1);
-    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
-                        (uint8_t *)"\1", 1);
+    /*
+     * Test new cert truncated to length i as well as an empty buffer of the
+     * same length. Use a malloced buffer of the exact size so that valgrind
+     * can detect any OOB reads/writes.
+     */
+    for (i = 1; i < certB_len - 1; i++) {
+        uint8_t *buf = calloc(i, 1);
+        assert(buf);
+
+        sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+                       &test_timeb, buf, i,
+                       &sign_testPK, EFI_INVALID_PARAMETER);
+        check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+                            BSIZ, 0, (uint8_t *)"\0", 1);
+        check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                            (uint8_t *)"\1", 1);
+
+        memcpy(buf, certB, i);
+
+        sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+                       &test_timeb, buf, i,
+                       &sign_testPK, EFI_INVALID_PARAMETER);
+        check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+                            BSIZ, 0, (uint8_t *)"\0", 1);
+        check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                            (uint8_t *)"\1", 1);
+
+        free(buf);
+    }
 
     /* Try appending a second cert  - should not work */
     sign_and_check(PK_name, &gEfiGlobalVariableGuid,
@@ -1910,6 +1932,7 @@ static void sig_db_check(const dstring *key_db, const EFI_GUID *guid,
     UINTN data_len;
     UINT32 attr;
     EFI_STATUS status;
+    size_t i;
     uint8_t *setupmode = setup ? (uint8_t *)"\1" : (uint8_t *)"\0";
     uint8_t *securemode = setup ? (uint8_t *)"\0" : (uint8_t *)"\1";
 
@@ -1943,10 +1966,27 @@ static void sig_db_check(const dstring *key_db, const EFI_GUID *guid,
                    time, (uint8_t *)certA, certA_len,
                    &sign_certB, EFI_INVALID_PARAMETER);
 
-    /* new cert, truncated */
-    sign_and_check(key_db, guid, ATTR_BRNV_TIME,
-                   time, (uint8_t *)certA, certA_len - 8,
-                   &sign_testPK, EFI_INVALID_PARAMETER);
+    /*
+     * Test new cert truncated to length i as well as an empty buffer of the
+     * same length. Use a malloced buffer of the exact size so that valgrind
+     * can detect any OOB reads/writes.
+     */
+    for (i = 1; i < certA_len - 1; i++) {
+        uint8_t *buf = calloc(i, 1);
+        assert(buf);
+
+        sign_and_check(key_db, guid, ATTR_BRNV_TIME,
+                       time, buf, i,
+                       &sign_testPK, EFI_INVALID_PARAMETER);
+
+        memcpy(buf, certA, i);
+
+        sign_and_check(key_db, guid, ATTR_BRNV_TIME,
+                       time, buf, i,
+                       &sign_testPK, EFI_INVALID_PARAMETER);
+
+        free(buf);
+    }
 
     /* try a valid signed cert, but not signed by PK */
     sign_and_check(key_db, guid, ATTR_BRNV_TIME, time, (uint8_t *)certB, certB_len,

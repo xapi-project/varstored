@@ -649,7 +649,8 @@ check_signature_list_format(uint8_t *name, UINTN name_len,
     sig_list  = (EFI_SIGNATURE_LIST *)data;
     remaining = data_len;
 
-    while ((remaining > 0) && (remaining >= sig_list->SignatureListSize)) {
+    while ((remaining >= sizeof(*sig_list)) &&
+           (remaining >= sig_list->SignatureListSize)) {
         for (i = 0; i < NUM_OF_SUPPORTED_SIG_ITEMS; i++) {
             if (!memcmp(&sig_list->SignatureType, &mSupportSigItem[i].SigType,
                         GUID_LEN)) {
@@ -664,6 +665,21 @@ check_signature_list_format(uint8_t *name, UINTN name_len,
         }
 
         if (i == NUM_OF_SUPPORTED_SIG_ITEMS)
+            return EFI_INVALID_PARAMETER;
+
+        /*
+         * Check SignatureHeaderSize since its size may be undefined in
+         * mSupportSigItem.
+         */
+        if (sig_list->SignatureHeaderSize >
+                (sig_list->SignatureListSize - sizeof(EFI_SIGNATURE_LIST)))
+            return EFI_INVALID_PARAMETER;
+
+        /*
+         * Check SignatureSize since its size may be undefined in
+         * mSupportSigItem.
+         */
+        if (sig_list->SignatureSize == 0)
             return EFI_INVALID_PARAMETER;
 
         list_body_size = sig_list->SignatureListSize - sizeof(EFI_SIGNATURE_LIST) -
