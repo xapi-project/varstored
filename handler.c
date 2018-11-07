@@ -1233,6 +1233,12 @@ check_attr(uint8_t *name, UINTN name_len, EFI_GUID *guid, UINT32 attr)
     return false;
 }
 
+/*
+ * Append a signature list, new_data, to an existing signature list, data,
+ * while removing duplicates. This function must only be called with valid
+ * signature lists (i.e. check_signature_list_format has already been called
+ * on the signature list).
+ */
 static EFI_STATUS
 filter_signature_list(uint8_t *data, UINTN data_len,
                       uint8_t *new_data, UINTN *new_data_len)
