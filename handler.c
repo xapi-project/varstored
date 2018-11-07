@@ -1039,7 +1039,7 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
 
         /*
          * For the PK, the spec states:
-         * "The variable has the format of a signature database as described in 
+         * "The variable has the format of a signature database as described in
          * “Signature Database” below, with exactly one entry."
          * Enforce this, as to be consistent with check_signature_list_format
          */
@@ -1069,13 +1069,15 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
             goto out;
 
         if (setup_mode == 1 && *payload_len_out != 0) {
+            EFI_STATUS saved_status;
+
             setup_mode = 0;
-            status = internal_set_variable(EFI_SETUP_MODE_NAME,
-                                           sizeof(EFI_SETUP_MODE_NAME),
-                                           &gEfiGlobalVariableGuid,
-                                           &setup_mode,
-                                           sizeof(setup_mode),
-                                           ATTR_BR);
+            saved_status = internal_set_variable(EFI_SETUP_MODE_NAME,
+                                                 sizeof(EFI_SETUP_MODE_NAME),
+                                                 &gEfiGlobalVariableGuid,
+                                                 &setup_mode,
+                                                 sizeof(setup_mode),
+                                                 ATTR_BR);
 
             secure_boot = secure_boot_enable;
             status = internal_set_variable(EFI_SECURE_BOOT_MODE_NAME,
@@ -1084,14 +1086,23 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
                                            &secure_boot,
                                            sizeof(secure_boot),
                                            ATTR_BR);
+
+            /*
+             * Always try to update both internal variables but return an error
+             * if either fail.
+             */
+            if (saved_status != EFI_SUCCESS)
+                status = saved_status;
         } else if (setup_mode == 0 && *payload_len_out == 0) {
+            EFI_STATUS saved_status;
+
             setup_mode = 1;
-            status = internal_set_variable(EFI_SETUP_MODE_NAME,
-                                           sizeof(EFI_SETUP_MODE_NAME),
-                                           &gEfiGlobalVariableGuid,
-                                           &setup_mode,
-                                           sizeof(setup_mode),
-                                           ATTR_BR);
+            saved_status = internal_set_variable(EFI_SETUP_MODE_NAME,
+                                                 sizeof(EFI_SETUP_MODE_NAME),
+                                                 &gEfiGlobalVariableGuid,
+                                                 &setup_mode,
+                                                 sizeof(setup_mode),
+                                                 ATTR_BR);
 
             secure_boot = 0;
             status = internal_set_variable(EFI_SECURE_BOOT_MODE_NAME,
@@ -1100,6 +1111,13 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
                                            &secure_boot,
                                            sizeof(secure_boot),
                                            ATTR_BR);
+
+            /*
+             * Always try to update both internal variables but return an error
+             * if either fail.
+             */
+            if (saved_status != EFI_SUCCESS)
+                status = saved_status;
         }
     } else if (name_len == sizeof(EFI_KEY_EXCHANGE_KEY_NAME) &&
                !memcmp(name, EFI_KEY_EXCHANGE_KEY_NAME, name_len) &&
