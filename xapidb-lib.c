@@ -391,13 +391,10 @@ base64_encode(const uint8_t *buf, size_t len, char **out)
     size_t total = 0;
 
     bio = BIO_new(BIO_s_mem());
-    if (!bio) {
-        /* DBG("Failed to create BIO\n"); */
+    if (!bio)
         return false;
-    }
     b64 = BIO_new(BIO_f_base64());
     if (!b64) {
-        /* DBG("Failed to create BIO\n"); */
         BIO_free_all(bio);
         return false;
     }
