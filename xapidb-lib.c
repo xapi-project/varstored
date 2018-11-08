@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -104,6 +105,12 @@ char *xapidb_arg_uuid;
  * does not change.
  */
 static char *xapidb_vm_ref;
+
+#define MAX_CREDIT        100
+#define CREDIT_PER_SECOND 2
+#define NS_PER_CREDIT (1000000000 / CREDIT_PER_SECOND)
+static time_t last_time; /* Time of the last send. */
+static unsigned int send_credit = MAX_CREDIT; /* Number of allowed fast sends. */
 
 /*
  * Serializes the list of variables into a buffer. The buffer must be freed by
@@ -433,6 +440,7 @@ xapidb_set_variable(void)
     char *encoded;
     size_t len;
     bool ret;
+    time_t cur_time, diff_time;
 
     if (!xapidb_arg_uuid)
         return true;
@@ -446,6 +454,27 @@ xapidb_set_variable(void)
         return false;
     }
     free(buf);
+
+    /*
+     * To avoid a DoS on XAPI by the VM, rate limit sends to XAPI.
+     * Normal usage should never hit this.
+     */
+    cur_time = time(NULL);
+    diff_time = cur_time - last_time;
+    last_time = cur_time;
+    send_credit += diff_time * CREDIT_PER_SECOND;
+    if (send_credit > MAX_CREDIT)
+        send_credit = MAX_CREDIT;
+
+    if (send_credit > 0) {
+        send_credit--;
+    } else {
+        /* If no credit, wait the correct amount of time to get a credit. */
+        struct timespec ts = {0, NS_PER_CREDIT};
+
+        nanosleep(&ts, NULL);
+        last_time = time(NULL);
+    }
 
     ret = send_to_xapi(xapidb_arg_uuid, encoded);
     free(encoded);
