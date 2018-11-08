@@ -113,7 +113,7 @@ io_port_initialize(xc_interface *xch, domid_t domid, ioservid_t ioservid)
         ERR("xc_hvm_map_io_range_to_ioreq_server failed: rc %d\n", rc);
         return -1;
     }
-                                   
+
     DBG("map IO port: %016"PRIx32" - %016"PRIx32"\n", io_port.addr,
         io_port.addr + io_port.size - 1);
 
