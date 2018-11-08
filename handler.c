@@ -369,12 +369,19 @@ out:
     return status;
 }
 
+#ifndef X509_V_FLAG_NO_CHECK_TIME
+#define OPENSSL_NO_CHECK_TIME 0
+
 /*
  * Verification callback function to override the existing callbacks in
  * OpenSSL.  This is required due to the lack of X509_V_FLAG_NO_CHECK_TIME in
  * OpenSSL 1.0.2.  This function has been taken directly from an older version
- * of edk2 and been to use X509_V_ERR_CERT_HAS_EXPIRED. XXX is it used in the
- * correct way?
+ * of edk2 and been to use X509_V_ERR_CERT_HAS_EXPIRED and
+ * X509_V_ERR_CERT_NOT_YET_VALID since verification of the timestamps in
+ * certificates is not typically done in firmware due to untrustworthy system
+ * time. This part was taken from a patch sent to the edk2 mailing list by
+ * David Woodhouse entitled "CryptoPkg: Remove OpenSSL hack and manually ignore
+ * validity time range".
  */
 static int
 X509_verify_cb(int status, X509_STORE_CTX *context)
@@ -417,13 +424,17 @@ X509_verify_cb(int status, X509_STORE_CTX *context)
 
     if ((error == X509_V_ERR_CERT_UNTRUSTED) ||
             (error == X509_V_ERR_UNABLE_TO_VERIFY_LEAF_SIGNATURE) ||
-            (error == X509_V_ERR_CERT_HAS_EXPIRED))
+            (error == X509_V_ERR_CERT_HAS_EXPIRED) ||
+            (error == X509_V_ERR_CERT_NOT_YET_VALID))
         status = 1;
 
     free(obj);
 
     return status;
 }
+#else
+#define OPENSSL_NO_CHECK_TIME X509_V_FLAG_NO_CHECK_TIME
+#endif
 
 /*
  * Check whether input p7data is a wrapped ContentInfo structure or not. Wrap
@@ -514,7 +525,9 @@ pkcs7_verify(const uint8_t *p7data, UINTN p7_len, X509 *trusted_cert,
         goto out;
     }
 
+#ifndef X509_V_FLAG_NO_CHECK_TIME
     cert_store->verify_cb = X509_verify_cb;
+#endif
 
     if (!(X509_STORE_add_cert(cert_store, trusted_cert))) {
         status = EFI_SECURITY_VIOLATION;
@@ -532,7 +545,8 @@ pkcs7_verify(const uint8_t *p7data, UINTN p7_len, X509 *trusted_cert,
         goto out;
     }
 
-    X509_STORE_set_flags(cert_store, X509_V_FLAG_PARTIAL_CHAIN);
+    X509_STORE_set_flags(cert_store,
+                         X509_V_FLAG_PARTIAL_CHAIN | OPENSSL_NO_CHECK_TIME);
     X509_STORE_set_purpose(cert_store, X509_PURPOSE_ANY);
 
     if (PKCS7_verify(pkcs7, NULL, cert_store, data_bio, NULL, PKCS7_BINARY))
