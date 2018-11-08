@@ -47,7 +47,7 @@ io_port_writel(uint64_t offset, uint32_t val)
 
     dispatch_command(shmem);
 
-    munmap(shmem, XC_PAGE_SIZE);
+    munmap(shmem, SHMEM_SIZE);
 }
 
 void
