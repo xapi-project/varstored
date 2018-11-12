@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <assert.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -22,7 +23,8 @@
 typedef struct io_port {
     void            (*writel)(uint64_t offset, uint32_t val);
 
-    xc_interface    *xch;
+    xendevicemodel_handle *dmod;
+    xenforeignmemory_handle *fmem;
     domid_t         domid;
     ioservid_t      ioservid;
     uint32_t        addr;
@@ -30,16 +32,22 @@ typedef struct io_port {
     int             enable;
 } io_port_t;
 
-static io_port_t io_port;
+static io_port_t io_port = { .addr = IO_PORT_UNMAPPED };
 
 static void
 io_port_writel(uint64_t offset, uint32_t val)
 {
-    void *shmem = xc_map_foreign_range(io_port.xch,
-                                       io_port.domid,
-                                       SHMEM_SIZE,
-                                       PROT_READ | PROT_WRITE,
-                                       val);
+    xen_pfn_t pfns[SHMEM_PAGES];
+    void *shmem;
+    int i;
+
+    for (i = 0; i < SHMEM_PAGES; i++)
+        pfns[i] = val + i;
+
+    shmem = xenforeignmemory_map(io_port.fmem,
+                                 io_port.domid,
+                                 PROT_READ | PROT_WRITE,
+                                 SHMEM_PAGES, pfns, NULL);
     if (!shmem) {
         DBG("map foreign range failed: %d\n", errno);
         return;
@@ -47,7 +55,7 @@ io_port_writel(uint64_t offset, uint32_t val)
 
     dispatch_command(shmem);
 
-    munmap(shmem, SHMEM_SIZE);
+    xenforeignmemory_unmap(io_port.fmem, shmem, SHMEM_PAGES);
 }
 
 void
@@ -58,12 +66,13 @@ io_port_deregister(void)
     if (io_port.addr == IO_PORT_UNMAPPED)
         return;
 
-    (void) xc_hvm_unmap_io_range_from_ioreq_server(io_port.xch,
-                                                   io_port.domid,
-                                                   io_port.ioservid,
-                                                   0,
-                                                   io_port.addr,
-                                                   io_port.addr + io_port.size - 1);
+    (void) xendevicemodel_unmap_io_range_from_ioreq_server(
+               io_port.dmod,
+               io_port.domid,
+               io_port.ioservid,
+               0,
+               io_port.addr,
+               io_port.addr + io_port.size - 1);
 
     io_port.addr = IO_PORT_UNMAPPED;
 }
@@ -83,16 +92,20 @@ io_port_write(uint64_t addr, uint64_t size, uint32_t val)
 }
 
 int
-io_port_initialize(xc_interface *xch, domid_t domid, ioservid_t ioservid)
+io_port_initialize(xendevicemodel_handle *dmod, xenforeignmemory_handle *fmem,
+                   domid_t domid, ioservid_t ioservid)
 {
     int rc;
 
-    io_port.xch = xch;
+    io_port.dmod = dmod;
+    io_port.fmem = fmem;
     io_port.domid = domid;
     io_port.ioservid = ioservid;
 
-    if (io_port.enable)
+    if (io_port.enable) {
+        ERR("Cannot initialize already enable ioport!\n");
         return -1;
+    }
 
     io_port.writel = io_port_writel;
 
@@ -102,15 +115,17 @@ io_port_initialize(xc_interface *xch, domid_t domid, ioservid_t ioservid)
     io_port.enable = 1;
     io_port.addr = IO_PORT_ADDRESS;
 
-    rc = xc_hvm_map_io_range_to_ioreq_server(xch,
-                                            domid,
-                                            ioservid,
-                                            0,
-                                            io_port.addr,
-                                            io_port.addr + io_port.size - 1);
+    rc = xendevicemodel_map_io_range_to_ioreq_server(
+             dmod,
+             domid,
+             ioservid,
+             0,
+             io_port.addr,
+             io_port.addr + io_port.size - 1);
 
     if (rc < 0) {
-        ERR("xc_hvm_map_io_range_to_ioreq_server failed: rc %d\n", rc);
+        ERR("Failed to map io range to ioreq server: %d, %s\n",
+            errno, strerror(errno));
         return -1;
     }
 

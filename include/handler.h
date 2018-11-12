@@ -14,7 +14,9 @@
 #define DATA_LIMIT 57344 /* Maximum length of a single variable */
 #define TOTAL_LIMIT 65536 /* Maximum total storage */
 
-#define SHMEM_SIZE (16 * 4096)
+#define PAGE_SIZE 4096
+#define SHMEM_PAGES 16
+#define SHMEM_SIZE (SHMEM_PAGES * PAGE_SIZE)
 
 enum command_t {
     COMMAND_GET_VARIABLE,

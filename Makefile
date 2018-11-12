@@ -12,8 +12,6 @@ CFLAGS  = -I$(shell pwd)/include
 # _GNU_SOURCE for asprintf.
 CFLAGS += -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -D_GNU_SOURCE
 
-CFLAGS += -DXC_WANT_COMPAT_MAP_FOREIGN_API=1 -DXC_WANT_COMPAT_EVTCHN_API=1 -DXC_WANT_COMPAT_DEVICEMODEL_API=1
-
 CFLAGS += $$(pkg-config --cflags libxml-2.0)
 
 CFLAGS += -Wall -g -O2
@@ -22,7 +20,14 @@ ifeq ($(shell uname),Linux)
 LDLIBS := -lutil -lrt
 endif
 
-LDLIBS += -lxenstore -lxenctrl -lcrypto $$(pkg-config --libs libxml-2.0)
+LDLIBS += -lxenstore \
+          -lxenctrl \
+          -lxenforeignmemory \
+          -lxendevicemodel \
+          -lxenevtchn \
+          -lxentoolcore \
+          -lcrypto \
+          $$(pkg-config --libs libxml-2.0)
 
 # Get gcc to generate the dependencies for us.
 CFLAGS   += -Wp,-MD,$(@D)/.$(@F).d -MT $(@D)/$(@F)

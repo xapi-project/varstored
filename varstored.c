@@ -35,6 +35,10 @@
 #include <xenctrl.h>
 #include <xen/hvm/ioreq.h>
 #include <xenstore.h>
+#include <xenevtchn.h>
+#include <xendevicemodel.h>
+#include <xenforeignmemory.h>
+#include <xentoolcore.h>
 
 #include <debug.h>
 #include <handler.h>
@@ -105,35 +109,19 @@ usage(void)
     exit(2);
 }
 
-typedef enum {
-    VARSTORED_SEQ_UNINITIALIZED = 0,
-    VARSTORED_SEQ_INTERFACE_OPEN,
-    VARSTORED_SEQ_SERVER_REGISTERED,
-    VARSTORED_SEQ_SHARED_IOPAGE_MAPPED,
-    VARSTORED_SEQ_BUFFERED_IOPAGE_MAPPED,
-    VARSTORED_SEQ_SERVER_ENABLED,
-    VARSTORED_SEQ_PORT_ARRAY_ALLOCATED,
-    VARSTORED_SEQ_EVTCHN_OPEN,
-    VARSTORED_SEQ_PORTS_BOUND,
-    VARSTORED_SEQ_BUF_PORT_BOUND,
-    VARSTORED_SEQ_PORT_INITIALIZED,
-    VARSTORED_SEQ_WROTE_PID,
-    VARSTORED_SEQ_INITIALIZED,
-    VARSTORED_NR_SEQS
-} varstored_seq_t;
-
 typedef struct varstored_state {
-    varstored_seq_t     seq;
-    xc_interface        *xch;
-    xc_evtchn           *xceh;
-    domid_t             domid;
-    unsigned int        vcpus;
-    ioservid_t          ioservid;
-    shared_iopage_t     *iopage;
-    evtchn_port_or_error_t   *ioreq_local_port;
-    buffered_iopage_t        *buffered_iopage;
-    evtchn_port_or_error_t   buf_ioreq_port;
-    evtchn_port_or_error_t   buf_ioreq_local_port;
+    xendevicemodel_handle *dmod;
+    xenforeignmemory_handle *fmem;
+    xenevtchn_handle *evth;
+    domid_t domid;
+    unsigned int vcpus;
+    ioservid_t ioservid;
+    bool ioserv_created;
+    shared_iopage_t *iopage;
+    xc_evtchn_port_or_error_t *ioreq_local_port;
+    buffered_iopage_t *buffered_iopage;
+    xc_evtchn_port_or_error_t buf_ioreq_port;
+    xc_evtchn_port_or_error_t buf_ioreq_local_port;
 } varstored_state_t;
 
 static varstored_state_t varstored_state;
@@ -264,206 +252,46 @@ handle_ioreq(ioreq_t *ioreq)
 }
 
 static void
-varstored_seq_next(void)
-{
-    assert(varstored_state.seq < VARSTORED_SEQ_INITIALIZED);
-
-    switch (++varstored_state.seq) {
-    case VARSTORED_SEQ_INTERFACE_OPEN:
-        INFO(">INTERFACE_OPEN\n");
-        break;
-
-    case VARSTORED_SEQ_SERVER_REGISTERED:
-        INFO(">SERVER_REGISTERED\n");
-        INFO("ioservid = %u\n", varstored_state.ioservid);
-        break;
-
-    case VARSTORED_SEQ_SHARED_IOPAGE_MAPPED:
-        INFO(">SHARED_IOPAGE_MAPPED\n");
-        INFO("iopage = %p\n", varstored_state.iopage);
-        break;
-
-    case VARSTORED_SEQ_BUFFERED_IOPAGE_MAPPED:
-        INFO(">BUFFERED_IOPAGE_MAPPED\n");
-        INFO("buffered_iopage = %p\n", varstored_state.buffered_iopage);
-        break;
-
-    case VARSTORED_SEQ_SERVER_ENABLED:
-        INFO(">SERVER_ENABLED\n");
-        break;
-
-    case VARSTORED_SEQ_PORT_ARRAY_ALLOCATED:
-        INFO(">PORT_ARRAY_ALLOCATED\n");
-        break;
-
-    case VARSTORED_SEQ_EVTCHN_OPEN:
-        INFO(">EVTCHN_OPEN\n");
-        break;
-
-    case VARSTORED_SEQ_PORTS_BOUND: {
-        int i;
-
-        INFO(">EVTCHN_PORTS_BOUND\n");
-
-        for (i = 0; i < varstored_state.vcpus; i++)
-            INFO("VCPU%d: %u -> %u\n", i,
-                varstored_state.iopage->vcpu_ioreq[i].vp_eport,
-                varstored_state.ioreq_local_port[i]);
-
-        break;
-    }
-
-    case VARSTORED_SEQ_BUF_PORT_BOUND:
-        INFO(">EVTCHN_BUF_PORT_BOUND\n");
-
-        INFO("%u -> %u\n",
-            varstored_state.buf_ioreq_port,
-            varstored_state.buf_ioreq_local_port);
-        break;
-
-    case VARSTORED_SEQ_PORT_INITIALIZED:
-        INFO(">PORT_INITIALIZED\n");
-        break;
-
-    case VARSTORED_SEQ_WROTE_PID:
-        INFO(">WROTE_PID\n");
-        break;
-
-    case VARSTORED_SEQ_INITIALIZED:
-        INFO(">INITIALIZED\n");
-        break;
-
-    default:
-        assert(0);
-        break;
-    }
-}
-
-static void
 varstored_teardown(void)
 {
-    if (varstored_state.seq == VARSTORED_SEQ_INITIALIZED) {
-        INFO("<INITIALIZED\n");
+    int i;
 
-        varstored_state.seq = VARSTORED_SEQ_WROTE_PID;
-    }
+    io_port_deregister();
 
-    if (varstored_state.seq >= VARSTORED_SEQ_WROTE_PID) {
-        char *key;
-        struct xs_handle *xsh;
+    if (varstored_state.buf_ioreq_local_port >= 0)
+        xenevtchn_unbind(varstored_state.evth,
+                         varstored_state.buf_ioreq_local_port);
 
-        INFO("<WROTE_PID\n");
-
-        xsh = xs_open(0);
-        if (xsh) {
-            if (asprintf(&key, XS_VARSTORED_PID_PATH, varstored_state.domid) != -1) {
-                xs_rm(xsh, 0, key);
-                free(key);
-            } else {
-                INFO("Couldn't remove varstore pid from xenstore\n");
-            }
-            xs_close(xsh);
-        } else {
-            fprintf(stderr, "Couldn't open xenstore");
-        }
-
-        varstored_state.seq = VARSTORED_SEQ_PORT_INITIALIZED;
-    }
-
-    if (varstored_state.seq == VARSTORED_SEQ_PORT_INITIALIZED) {
-        INFO("<PORT_INITIALIZED\n");
-        io_port_deregister();
-
-        varstored_state.seq = VARSTORED_SEQ_PORTS_BOUND;
-    }
-
-    if (varstored_state.seq >= VARSTORED_SEQ_PORTS_BOUND) {
-        INFO("<EVTCHN_BUF_PORT_BOUND\n");
-        evtchn_port_or_error_t   port;
-
-        port = varstored_state.buf_ioreq_local_port;
-
-        INFO("%d\n", port);
-        (void) xc_evtchn_unbind(varstored_state.xceh, port);
-
-        varstored_state.seq = VARSTORED_SEQ_PORTS_BOUND;
-    }
-
-    if (varstored_state.seq >= VARSTORED_SEQ_PORTS_BOUND) {
-        INFO("<EVTCHN_PORTS_BOUND\n");
-
-        varstored_state.seq = VARSTORED_SEQ_EVTCHN_OPEN;
-    }
-
-    if (varstored_state.seq >= VARSTORED_SEQ_EVTCHN_OPEN) {
-        int i;
-
-        INFO("<EVTCHN_OPEN\n");
-
+    if (varstored_state.ioreq_local_port) {
         for (i = 0; i < varstored_state.vcpus; i++) {
-            evtchn_port_or_error_t port = varstored_state.ioreq_local_port[i];
-
-            if (port >= 0) {
-                INFO("VCPU%d: %d\n", i, port);
-                (void) xc_evtchn_unbind(varstored_state.xceh, port);
-            }
+            if (varstored_state.ioreq_local_port[i] >= 0)
+                xenevtchn_unbind(varstored_state.evth,
+                                 varstored_state.ioreq_local_port[i]);
         }
-
-        xc_evtchn_close(varstored_state.xceh);
-
-        varstored_state.seq = VARSTORED_SEQ_PORT_ARRAY_ALLOCATED;
-    }
-
-    if (varstored_state.seq >= VARSTORED_SEQ_PORT_ARRAY_ALLOCATED) {
-        INFO("<PORT_ARRAY_ALLOCATED\n");
-
         free(varstored_state.ioreq_local_port);
-
-        varstored_state.seq = VARSTORED_SEQ_SERVER_ENABLED;
     }
 
-    if (varstored_state.seq == VARSTORED_SEQ_SERVER_ENABLED) {
-        INFO("<SERVER_ENABLED\n");
-        (void) xc_hvm_set_ioreq_server_state(varstored_state.xch,
-                                             varstored_state.domid,
-                                             varstored_state.ioservid,
-                                             0);
+    if (varstored_state.ioserv_created)
+        xendevicemodel_set_ioreq_server_state(varstored_state.dmod,
+                                              varstored_state.domid,
+                                              varstored_state.ioservid,
+                                              0);
 
-        varstored_state.seq = VARSTORED_SEQ_BUFFERED_IOPAGE_MAPPED;
-    }
+    if (varstored_state.buffered_iopage)
+        xenforeignmemory_unmap(varstored_state.fmem,
+                               varstored_state.buffered_iopage, 1);
 
-    if (varstored_state.seq >= VARSTORED_SEQ_BUFFERED_IOPAGE_MAPPED) {
-        INFO("<BUFFERED_IOPAGE_MAPPED\n");
+    if (varstored_state.iopage)
+        xenforeignmemory_unmap(varstored_state.fmem, varstored_state.iopage, 1);
 
-        munmap(varstored_state.buffered_iopage, XC_PAGE_SIZE);
+    if (varstored_state.ioserv_created)
+        xendevicemodel_destroy_ioreq_server(varstored_state.dmod,
+                                            varstored_state.domid,
+                                            varstored_state.ioservid);
 
-        varstored_state.seq = VARSTORED_SEQ_SHARED_IOPAGE_MAPPED;
-    }
-
-    if (varstored_state.seq >= VARSTORED_SEQ_SHARED_IOPAGE_MAPPED) {
-        INFO("<SHARED_IOPAGE_MAPPED\n");
-
-        munmap(varstored_state.iopage, XC_PAGE_SIZE);
-
-        varstored_state.seq = VARSTORED_SEQ_SERVER_REGISTERED;
-    }
-
-    if (varstored_state.seq >= VARSTORED_SEQ_SERVER_REGISTERED) {
-        INFO("<SERVER_REGISTERED\n");
-
-        (void) xc_hvm_destroy_ioreq_server(varstored_state.xch,
-                                           varstored_state.domid,
-                                           varstored_state.ioservid);
-        varstored_state.seq = VARSTORED_SEQ_INTERFACE_OPEN;
-    }
-
-    if (varstored_state.seq >= VARSTORED_SEQ_INTERFACE_OPEN) {
-        INFO("<INTERFACE_OPEN\n");
-
-        xc_interface_close(varstored_state.xch);
-
-        varstored_state.seq = VARSTORED_SEQ_UNINITIALIZED;
-    }
+    xendevicemodel_close(varstored_state.dmod);
+    xenforeignmemory_close(varstored_state.fmem);
+    xenevtchn_close(varstored_state.evth);
 }
 
 static struct sigaction sigterm_handler;
@@ -491,41 +319,50 @@ varstored_sigusr1(int num)
     sigaction(SIGHUP, &sigusr1_handler, NULL);
 }
 
-static int
+static bool
 varstored_initialize(domid_t domid)
 {
     int rc, i, subcount = 0, first = 1;
     uint64_t number = 0;
     xc_dominfo_t dominfo;
-    unsigned long pfn;
-    unsigned long buf_pfn;
+    xen_pfn_t pfn;
+    xen_pfn_t buf_pfn;
     evtchn_port_t port;
     evtchn_port_t buf_port;
-    struct xs_handle *xsh;
+    struct xs_handle *xsh = NULL;
+    xc_interface *xch = NULL;
 
+    varstored_state.buf_ioreq_local_port = -1;
     varstored_state.domid = domid;
 
-    varstored_state.xch = xc_interface_open(NULL, NULL, 0);
-    if (varstored_state.xch == NULL)
-        goto fail1;
+    xch = xc_interface_open(NULL, NULL, 0);
+    if (!xch) {
+        ERR("Failed to open xc_interface handle: %d, %s\n",
+            errno, strerror(errno));
+        goto err;
+    }
 
-    varstored_seq_next();
-
-    rc = xc_domain_getinfo(varstored_state.xch, varstored_state.domid, 1, &dominfo);
-    if (rc < 0 || dominfo.domid != varstored_state.domid)
-        goto fail2;
+    rc = xc_domain_getinfo(xch, domid, 1, &dominfo);
+    if (rc < 0) {
+        ERR("Failed to get domain info: %d, %s\n", errno, strerror(errno));
+        goto err;
+    }
+    if (dominfo.domid != domid) {
+        ERR("Domid %u does not match expected %u\n", dominfo.domid, domid);
+        goto err;
+    }
 
     varstored_state.vcpus = dominfo.max_vcpu_id + 1;
 
     INFO("%d vCPU(s)\n", varstored_state.vcpus);
 
     do {
-        rc = xc_hvm_param_get(varstored_state.xch, varstored_state.domid,
+        rc = xc_hvm_param_get(xch, varstored_state.domid,
                               HVM_PARAM_NR_IOREQ_SERVER_PAGES, &number);
 
         if (rc < 0) {
             ERR("xc_hvm_param_get failed: %d, %s", errno, strerror(errno));
-            exit(1);
+            goto err;
         }
 
         if (first || number > 0)
@@ -542,181 +379,183 @@ varstored_initialize(domid_t domid)
         }
     } while (number == 0);
 
-    rc = xc_hvm_create_ioreq_server(varstored_state.xch, varstored_state.domid, 1,
-                                    &varstored_state.ioservid);
-    if (rc < 0)
-        goto fail3;
+    xc_interface_close(xch);
+    xch = NULL;
 
-    varstored_seq_next();
+    varstored_state.dmod = xendevicemodel_open(NULL, 0);
+    if (!varstored_state.dmod) {
+        ERR("Failed to open xendevicemodel handle: %d, %s\n",
+            errno, strerror(errno));
+        goto err;
+    }
 
-    rc = xc_hvm_get_ioreq_server_info(varstored_state.xch, varstored_state.domid,
-                                      varstored_state.ioservid, &pfn, &buf_pfn, &buf_port);
-    if (rc < 0)
-        goto fail4;
+    varstored_state.fmem = xenforeignmemory_open(NULL, 0);
+    if (!varstored_state.fmem) {
+        ERR("Failed to open xenforeignmemory handle: %d, %s\n",
+            errno, strerror(errno));
+        goto err;
+    }
 
-    varstored_state.iopage = xc_map_foreign_range(varstored_state.xch,
-                                             varstored_state.domid,
-                                             XC_PAGE_SIZE,
-                                             PROT_READ | PROT_WRITE,
-                                             pfn);
-    if (varstored_state.iopage == NULL)
-        goto fail5;
+    varstored_state.evth = xenevtchn_open(NULL, 0);
+    if (!varstored_state.evth) {
+        ERR("Failed to open evtchn handle: %d, %s\n",
+            errno, strerror(errno));
+        goto err;
+    }
 
-    varstored_seq_next();
+    rc = xentoolcore_restrict_all(domid);
+    if (rc < 0) {
+        ERR("Failed to restrict Xen handles: %d, %s\n", errno, strerror(errno));
+        goto err;
+    }
 
-    varstored_state.buffered_iopage = xc_map_foreign_range(varstored_state.xch,
-                                                      varstored_state.domid,
-                                                      XC_PAGE_SIZE,
-                                                      PROT_READ | PROT_WRITE,
-                                                      buf_pfn);
-    if (varstored_state.buffered_iopage == NULL)
-        goto fail6;
+    rc = xendevicemodel_create_ioreq_server(varstored_state.dmod,
+                                            varstored_state.domid, 1,
+                                            &varstored_state.ioservid);
+    if (rc < 0) {
+        ERR("Failed to create ioreq server: %d, %s\n", errno, strerror(errno));
+        goto err;
+    }
+    varstored_state.ioserv_created = true;
 
-    varstored_seq_next();
+    rc = xendevicemodel_get_ioreq_server_info(varstored_state.dmod,
+                                              varstored_state.domid,
+                                              varstored_state.ioservid,
+                                              &pfn, &buf_pfn, &buf_port);
+    if (rc < 0) {
+        ERR("Failed to get ioreq server info: %d, %s\n", errno, strerror(errno));
+        goto err;
+    }
+    INFO("ioservid = %u\n", varstored_state.ioservid);
 
-    rc = xc_hvm_set_ioreq_server_state(varstored_state.xch,
-                                       varstored_state.domid,
-                                       varstored_state.ioservid,
-                                       1);
-    if (rc != 0)
-        goto fail7;
+    varstored_state.iopage = xenforeignmemory_map(varstored_state.fmem,
+                                                  varstored_state.domid,
+                                                  PROT_READ | PROT_WRITE,
+                                                  1, &pfn, NULL);
+    if (!varstored_state.iopage) {
+        ERR("Failed to map iopage: %d, %s\n", errno, strerror(errno));
+        goto err;
+    }
+    INFO("iopage = %p\n", varstored_state.iopage);
 
-    varstored_seq_next();
+    varstored_state.buffered_iopage = xenforeignmemory_map(
+                                          varstored_state.fmem,
+                                          varstored_state.domid,
+                                          PROT_READ | PROT_WRITE,
+                                          1, &buf_pfn, NULL);
+    if (!varstored_state.buffered_iopage) {
+        ERR("Failed to map buffered iopage: %d, %s\n", errno, strerror(errno));
+        goto err;
+    }
+    INFO("buffered_iopage = %p\n", varstored_state.buffered_iopage);
 
-    varstored_state.ioreq_local_port = malloc(sizeof (evtchn_port_or_error_t) *
+    rc = xendevicemodel_set_ioreq_server_state(varstored_state.dmod,
+                                               varstored_state.domid,
+                                               varstored_state.ioservid,
+                                               1);
+    if (rc != 0) {
+        ERR("Failed to set ioreq server state: %d, %s\n", errno, strerror(errno));
+        goto err;
+    }
+
+    varstored_state.ioreq_local_port = malloc(sizeof (xc_evtchn_port_or_error_t) *
                                          varstored_state.vcpus);
-    if (varstored_state.ioreq_local_port == NULL)
-        goto fail8;
+    if (!varstored_state.ioreq_local_port) {
+        ERR("Failed to alloc port array: %d, %s\n", errno, strerror(errno));
+        goto err;
+    }
 
     for (i = 0; i < varstored_state.vcpus; i++)
         varstored_state.ioreq_local_port[i] = -1;
 
-    varstored_seq_next();
-
-    varstored_state.xceh = xc_evtchn_open(NULL, 0);
-    if (varstored_state.xceh == NULL)
-        goto fail9;
-
-    varstored_seq_next();
-
     for (i = 0; i < varstored_state.vcpus; i++) {
         port = varstored_state.iopage->vcpu_ioreq[i].vp_eport;
 
-        rc = xc_evtchn_bind_interdomain(varstored_state.xceh, varstored_state.domid,
+        rc = xenevtchn_bind_interdomain(varstored_state.evth, varstored_state.domid,
                                         port);
-        if (rc < 0)
-            goto fail10;
-
+        if (rc < 0) {
+            ERR("Failed to failed to bind port: %d, %s\n", errno, strerror(errno));
+            goto err;
+        }
         varstored_state.ioreq_local_port[i] = rc;
     }
 
-    varstored_seq_next();
+    for (i = 0; i < varstored_state.vcpus; i++)
+        INFO("VCPU%d: %u -> %u\n", i,
+            varstored_state.iopage->vcpu_ioreq[i].vp_eport,
+            varstored_state.ioreq_local_port[i]);
 
-    rc = xc_evtchn_bind_interdomain(varstored_state.xceh, varstored_state.domid,
+    rc = xenevtchn_bind_interdomain(varstored_state.evth, varstored_state.domid,
                                     buf_port);
-    if (rc < 0)
-        goto fail11;
-
+    if (rc < 0) {
+        ERR("Failed to failed to bind buffered port: %d, %s\n",
+            errno, strerror(errno));
+        goto err;
+    }
     varstored_state.buf_ioreq_local_port = rc;
 
-    varstored_seq_next();
+    INFO("%u -> %u\n",
+        varstored_state.buf_ioreq_port,
+        varstored_state.buf_ioreq_local_port);
 
-    rc = io_port_initialize(varstored_state.xch, varstored_state.domid,
-                            varstored_state.ioservid);
-
+    rc = io_port_initialize(varstored_state.dmod, varstored_state.fmem,
+                            varstored_state.domid, varstored_state.ioservid);
     if (rc < 0)
-        goto fail12;
-
-    varstored_seq_next();
+        goto err;
 
     xsh = xs_open(0);
-    if (xsh == NULL) {
-        fprintf(stderr, "Couldn't open xenstore");
-        goto fail12;
+    if (!xsh) {
+        ERR("Couldn't open xenstore: %d, %s", errno, strerror(errno));
+        goto err;
     }
 
     initialize_settings(xsh, varstored_state.domid);
 
     if (opt_resume) {
-        if (!db->resume())
-            goto fail13;
+        if (!db->resume()) {
+            ERR("Failed to resume!\n");
+            goto err;
+        }
     } else {
         enum backend_init_status status = db->init();
 
-        if (status == BACKEND_INIT_FAILURE)
-            goto fail13;
+        if (status == BACKEND_INIT_FAILURE) {
+            ERR("Failed to initialize backend!\n");
+            goto err;
+        }
 
-        if (!setup_variables())
-            goto fail13;
+        if (!setup_variables()) {
+            ERR("Failed to setup variables\n");
+            goto err;
+        }
 
         if (status == BACKEND_INIT_FIRSTBOOT) {
-            if (!setup_keys())
-                goto fail13;
+            if (!setup_keys()) {
+                ERR("Failed to setup keys\n");
+                goto err;
+            }
         }
     }
 
-    if (!xs_write_pid(xsh, varstored_state.domid))
-        goto fail13;
+    if (!xs_write_pid(xsh, varstored_state.domid)) {
+        ERR("Failed to write pid to xenstore: %d, %s\n", errno, strerror(errno));
+        goto err;
+    }
 
     xs_close(xsh);
+    xsh = NULL;
 
-    varstored_seq_next();
+    return true;
 
-    varstored_seq_next();
-
-    assert(varstored_state.seq == VARSTORED_SEQ_INITIALIZED);
-    return 0;
-
-fail13:
+err:
+    xc_interface_close(xch);
     xs_close(xsh);
-    ERR("fail13\n");
-
-fail12:
-    ERR("fail12\n");
-
-fail11:
-    ERR("fail11\n");
-
-fail10:
-    ERR("fail10\n");
-
-fail9:
-    ERR("fail9\n");
-
-fail8:
-    ERR("fail8\n");
-
-fail7:
-    ERR("fail7\n");
-
-fail6:
-    ERR("fail6\n");
-
-fail5:
-    ERR("fail5\n");
-
-fail4:
-    ERR("fail4\n");
-
-fail3:
-    ERR("fail3\n");
-
-fail2:
-    ERR("fail2\n");
-
-fail1:
-    ERR("fail1\n");
-
-    warn("fail");
-    return -1;
+    return false;
 }
 
 static void
 varstored_poll_buffered_iopage(void)
 {
-    if (varstored_state.seq != VARSTORED_SEQ_INITIALIZED)
-        return;
-
     for (;;) {
         unsigned int    read_pointer;
         unsigned int    write_pointer;
@@ -771,9 +610,6 @@ varstored_poll_iopage(unsigned int i)
 {
     ioreq_t         *ioreq;
 
-    if (varstored_state.seq != VARSTORED_SEQ_INITIALIZED)
-        return;
-
     ioreq = &varstored_state.iopage->vcpu_ioreq[i];
     if (ioreq->state != STATE_IOREQ_READY) {
         fprintf(stderr, "IO request not ready\n");
@@ -789,29 +625,26 @@ varstored_poll_iopage(unsigned int i)
     ioreq->state = STATE_IORESP_READY;
     mb();
 
-    xc_evtchn_notify(varstored_state.xceh, varstored_state.ioreq_local_port[i]);
+    xenevtchn_notify(varstored_state.evth, varstored_state.ioreq_local_port[i]);
 }
 
 static void
 varstored_poll_iopages(void)
 {
-    evtchn_port_or_error_t   port;
-    int                      i;
+    xc_evtchn_port_or_error_t port;
+    int i;
 
-    if (varstored_state.seq != VARSTORED_SEQ_INITIALIZED)
-        return;
-
-    port = xc_evtchn_pending(varstored_state.xceh);
+    port = xenevtchn_pending(varstored_state.evth);
     if (port < 0)
         return;
 
     if (port == varstored_state.buf_ioreq_local_port) {
-        xc_evtchn_unmask(varstored_state.xceh, port);
+        xenevtchn_unmask(varstored_state.evth, port);
         varstored_poll_buffered_iopage();
     } else {
         for (i = 0; i < varstored_state.vcpus; i++) {
             if (port == varstored_state.ioreq_local_port[i]) {
-                xc_evtchn_unmask(varstored_state.xceh, port);
+                xenevtchn_unmask(varstored_state.evth, port);
                 varstored_poll_iopage(i);
             }
         }
@@ -937,13 +770,12 @@ main(int argc, char **argv, char **envp)
 
     sigprocmask(SIG_BLOCK, &block, NULL);
 
-    rc = varstored_initialize(domid);
-    if (rc < 0) {
+    if (!varstored_initialize(domid)) {
         varstored_teardown();
         exit(1);
     }
 
-    pfd.fd = xc_evtchn_fd(varstored_state.xceh);
+    pfd.fd = xenevtchn_fd(varstored_state.evth);
     pfd.events = POLLIN | POLLERR | POLLHUP;
     pfd.revents = 0;
 
