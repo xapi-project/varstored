@@ -33,6 +33,8 @@ xapidb_parse_arg(const char *name, const char *val)
         arg_save = strdup(val);
     else if (!strcmp(name, "uuid"))
         xapidb_arg_uuid = strdup(val);
+    else if (!strcmp(name, "socket"))
+        xapidb_arg_socket = strdup(val);
     else
         return false;
 

@@ -24,8 +24,6 @@
 #include <serialize.h>
 #include <xapidb.h>
 
-#define XAPI_SOCKET "/var/lib/xcp/xapi"
-
 #define MAX_HTTP_SIZE (128 * 1024)
 
 #define HTTP_STATUS_OK 200
@@ -111,6 +109,8 @@
 char *xapidb_arg_init;
 /* The VM's uuid. Used for saving to the XAPI db. */
 char *xapidb_arg_uuid;
+/* Path to the XAPI socket. */
+char *xapidb_arg_socket = "/var/lib/xcp/xapi";
 
 /*
  * The VM's opaqueref: cached for the lifetime of varstored.
@@ -252,7 +252,7 @@ xmlrpc_call(char **response, const char *fmt, ...)
 
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, XAPI_SOCKET, sizeof(addr.sun_path) - 1);
+    strncpy(addr.sun_path, xapidb_arg_socket, sizeof(addr.sun_path) - 1);
 
     fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd == -1) {

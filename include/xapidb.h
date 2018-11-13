@@ -20,6 +20,7 @@
 #define MAX_FILE_SIZE (128 * 1024)
 
 extern char *xapidb_arg_uuid;
+extern char *xapidb_arg_socket;
 
 size_t xapidb_serialize_variables(uint8_t **out, bool only_nv);
 bool xapidb_set_variable(void);

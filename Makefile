@@ -27,6 +27,7 @@ LDLIBS += -lxenstore \
           -lxenevtchn \
           -lxentoolcore \
           -lcrypto \
+          -lseccomp \
           $$(pkg-config --libs libxml-2.0)
 
 # Get gcc to generate the dependencies for us.

@@ -57,6 +57,16 @@
 #include <serialize.h>
 #include <handler.h>
 
+struct auth_info {
+    const uint8_t *name;
+    UINTN name_len;
+    EFI_GUID *guid;
+    const char *path;
+    bool append;
+    uint8_t *data;
+    off_t data_len;
+};
+
 /* Some values from edk2. */
 const uint8_t mOidValue[9] = {0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02};
 const uint8_t mSignatureSupport[] = {
@@ -94,6 +104,7 @@ const uint8_t EFI_SIGNATURE_SUPPORT_NAME[] = {'S',0,'i',0,'g',0,'n',0,'a',0,'t',
 const uint8_t EFI_IMAGE_SECURITY_DATABASE[] = {'d',0,'b',0};
 const uint8_t EFI_IMAGE_SECURITY_DATABASE1[] = {'d',0,'b',0,'x',0};
 const uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
+
 /*
  * A single variable takes up a minimum number of bytes.
  * This ensures a suitably low limit on the number of variables that can be
@@ -102,6 +113,17 @@ const uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
 #define VARIABLE_SIZE_OVERHEAD 128
 
 #define AUTH_PATH_PREFIX "/usr/share/varstored"
+
+static struct auth_info auth_info[] = {
+    {EFI_PLATFORM_KEY_NAME, sizeof(EFI_PLATFORM_KEY_NAME),
+     &gEfiGlobalVariableGuid, AUTH_PATH_PREFIX "/PK.auth", false},
+    {EFI_KEY_EXCHANGE_KEY_NAME, sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
+     &gEfiGlobalVariableGuid, AUTH_PATH_PREFIX "/KEK.auth", false},
+    {EFI_IMAGE_SECURITY_DATABASE, sizeof(EFI_IMAGE_SECURITY_DATABASE),
+     &gEfiImageSecurityDatabaseGuid, AUTH_PATH_PREFIX "/db.auth", false},
+    {EFI_IMAGE_SECURITY_DATABASE1, sizeof(EFI_IMAGE_SECURITY_DATABASE1),
+     &gEfiImageSecurityDatabaseGuid, AUTH_PATH_PREFIX "/dbx.auth", true},
+};
 
 struct efi_variable *var_list;
 bool secure_boot_enable;
@@ -1960,16 +1982,58 @@ setup_variables(void)
 
 static bool
 set_variable_from_auth(const uint8_t *name, UINTN name_len, EFI_GUID *guid,
-                       char *path, bool append)
+                       const uint8_t *data, off_t data_len, bool append)
 {
     uint8_t buf[SHMEM_SIZE];
-    uint8_t *ptr, *data;
-    struct stat st;
-    FILE *f;
+    uint8_t *ptr;
     UINT32 attr = ATTR_BRNV_TIME;
 
     if (append)
         attr |= EFI_VARIABLE_APPEND_WRITE;
+
+    ptr = buf;
+    serialize_uint32(&ptr, 1); /* version */
+    serialize_uint32(&ptr, COMMAND_SET_VARIABLE);
+    serialize_data(&ptr, name, name_len);
+    serialize_guid(&ptr, guid);
+    serialize_data(&ptr, data, data_len);
+    serialize_uint32(&ptr, attr);
+    *ptr = 0; /* at_runtime */
+    dispatch_command(buf);
+
+    ptr = buf;
+    if (unserialize_uintn(&ptr) == EFI_SUCCESS) {
+        return true;
+    } else {
+        DBG("Failed to execute auth data\n");
+        return false;
+    }
+}
+
+bool
+setup_keys(void)
+{
+    int i;
+
+    for (i = 0; i < ARRAY_SIZE(auth_info); i++) {
+        if (!set_variable_from_auth(auth_info[i].name,
+                                    auth_info[i].name_len,
+                                    auth_info[i].guid,
+                                    auth_info[i].data,
+                                    auth_info[i].data_len,
+                                    auth_info[i].append))
+            return false;
+    }
+
+    return true;
+}
+
+static bool
+load_one_auth_data(const char *path, uint8_t **data_out, off_t *len)
+{
+    struct stat st;
+    FILE *f;
+    uint8_t *data;
 
     f = fopen(path, "r");
     if (!f) {
@@ -2007,56 +2071,34 @@ set_variable_from_auth(const uint8_t *name, UINTN name_len, EFI_GUID *guid,
     }
     fclose(f);
 
-    ptr = buf;
-    serialize_uint32(&ptr, 1); /* version */
-    serialize_uint32(&ptr, COMMAND_SET_VARIABLE);
-    serialize_data(&ptr, name, name_len);
-    serialize_guid(&ptr, guid);
-    serialize_data(&ptr, data, st.st_size);
-    free(data);
-    serialize_uint32(&ptr, attr);
-    *ptr = 0; /* at_runtime */
-    dispatch_command(buf);
+    *data_out = data;
+    *len = st.st_size;
 
-    ptr = buf;
-    if (unserialize_uintn(&ptr) == EFI_SUCCESS) {
-        return true;
-    } else {
-        DBG("Failed to execute '%s'\n", path);
-        return false;
-    }
+    return true;
 }
 
 bool
-setup_keys(void)
+load_auth_data(void)
 {
-    bool ret;
+    int i;
 
-    ret = set_variable_from_auth(EFI_PLATFORM_KEY_NAME,
-                                 sizeof(EFI_PLATFORM_KEY_NAME),
-                                 &gEfiGlobalVariableGuid,
-                                 AUTH_PATH_PREFIX "/PK.auth", false);
-    if (!ret)
-        return false;
+    for (i = 0; i < ARRAY_SIZE(auth_info); i++) {
+        if (!load_one_auth_data(auth_info[i].path,
+                                &auth_info[i].data,
+                                &auth_info[i].data_len))
+            return false;
+    }
 
-    ret = set_variable_from_auth(EFI_KEY_EXCHANGE_KEY_NAME,
-                                 sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
-                                 &gEfiGlobalVariableGuid,
-                                 AUTH_PATH_PREFIX "/KEK.auth", false);
-    if (!ret)
-        return false;
+    return true;
+}
 
-    ret = set_variable_from_auth(EFI_IMAGE_SECURITY_DATABASE,
-                                 sizeof(EFI_IMAGE_SECURITY_DATABASE),
-                                 &gEfiImageSecurityDatabaseGuid,
-                                 AUTH_PATH_PREFIX "/db.auth", false);
-    if (!ret)
-        return false;
+void
+free_auth_data(void)
+{
+    int i;
 
-    ret = set_variable_from_auth(EFI_IMAGE_SECURITY_DATABASE1,
-                                 sizeof(EFI_IMAGE_SECURITY_DATABASE1),
-                                 &gEfiImageSecurityDatabaseGuid,
-                                 AUTH_PATH_PREFIX "/dbx.auth", true);
-
-    return ret;
+    for (i = 0; i < ARRAY_SIZE(auth_info); i++) {
+        free(auth_info[i].data);
+        auth_info[i].data = NULL;
+    }
 }

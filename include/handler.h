@@ -18,6 +18,8 @@
 #define SHMEM_PAGES 16
 #define SHMEM_SIZE (SHMEM_PAGES * PAGE_SIZE)
 
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof(x[0]))
+
 enum command_t {
     COMMAND_GET_VARIABLE,
     COMMAND_SET_VARIABLE,
@@ -44,6 +46,8 @@ void dispatch_command(uint8_t *comm_buf);
 void load_list();
 bool setup_variables(void);
 bool setup_keys(void);
+bool load_auth_data(void);
+void free_auth_data(void);
 
 extern bool secure_boot_enable;
 extern bool auth_enforce;
