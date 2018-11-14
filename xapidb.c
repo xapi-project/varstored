@@ -10,6 +10,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #include <backend.h>
 #include <debug.h>
@@ -136,4 +138,5 @@ struct backend xapidb = {
     .save = xapidb_save,
     .resume = xapidb_resume,
     .set_variable = xapidb_set_variable,
+    .sb_notify = xapidb_sb_notify,
 };

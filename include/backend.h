@@ -26,6 +26,8 @@ struct backend {
     bool (*resume)(void);
     /* Called when set_variable updates an NV variable. */
     bool (*set_variable)(void);
+    /* Called when a Secure Boot verification failure occurs. */
+    bool (*sb_notify)(void);
 };
 
 extern struct backend *db;

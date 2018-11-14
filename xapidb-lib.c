@@ -84,6 +84,20 @@
       "</params>" \
     "</methodCall>"
 
+#define VM_MESSAGE_CREATE_CALL \
+    "<?xml version='1.0'?>" \
+    "<methodCall>" \
+      "<methodName>message.create</methodName>" \
+      "<params>" \
+        "<param><value><string>%s</string></value></param>" \
+        "<param><value><string>%s</string></value></param>" \
+        "<param><value><int>%d</int></value></param>" \
+        "<param><value><string>%s</string></value></param>" \
+        "<param><value><string>%s</string></value></param>" \
+        "<param><value><string>%s</string></value></param>" \
+      "</params>" \
+    "</methodCall>"
+
 #define LOGOUT_CALL \
     "<?xml version='1.0'?>" \
     "<methodCall>" \
@@ -720,4 +734,49 @@ xapidb_init(void)
     free(buf);
 
     return ret ? BACKEND_INIT_SUCCESS : BACKEND_INIT_FAILURE;
+}
+
+bool
+xapidb_sb_notify(void)
+{
+    int status;
+    bool ret = false;
+    char *session_ref = NULL, *response = NULL;
+
+    status = xmlrpc_call(&response, LOGIN_CALL);
+    if (status != HTTP_STATUS_OK)
+        goto out;
+    if (!xmlrpc_process(response, &session_ref))
+        goto out;
+    free(response);
+    response = NULL;
+
+    status = xmlrpc_call(&response, VM_MESSAGE_CREATE_CALL,
+                         session_ref,
+                         "VM_SECURE_BOOT_FAILED",
+                         5, /* priority */
+                         "VM", /* class */
+                         xapidb_arg_uuid,
+                         "The VM failed to pass Secure Boot verification.");
+    if (status != HTTP_STATUS_OK)
+        goto out;
+    if (!xmlrpc_process(response, NULL))
+        goto out;
+    free(response);
+    response = NULL;
+
+    status = xmlrpc_call(&response, LOGOUT_CALL, session_ref);
+    if (status != HTTP_STATUS_OK)
+        goto out;
+    if (!xmlrpc_process(response, NULL))
+        goto out;
+    free(response);
+    response = NULL;
+
+    ret = true;
+
+out:
+    free(session_ref);
+    free(response);
+    return ret;
 }

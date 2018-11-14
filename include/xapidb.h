@@ -26,5 +26,6 @@ bool xapidb_set_variable(void);
 bool xapidb_parse_blob(uint8_t **buf, int len);
 enum backend_init_status xapidb_init(void);
 enum backend_init_status xapidb_file_init(void);
+bool xapidb_sb_notify(void);
 
 #endif

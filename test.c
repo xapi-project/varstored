@@ -13,8 +13,6 @@ static char *save_name = "test.dat";
 
 enum log_level log_level = LOG_LVL_ERROR;
 
-char *xapidb_arg_uuid;
-
 /* The communication buffer. */
 static uint8_t buf[16 * 4096];
 

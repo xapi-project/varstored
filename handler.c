@@ -42,8 +42,6 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 
 #include <openssl/objects.h>
 #include <openssl/rsa.h>
@@ -58,7 +56,6 @@
 #include <guid.h>
 #include <serialize.h>
 #include <handler.h>
-#include <xapidb.h>
 
 /* Some values from edk2. */
 const uint8_t mOidValue[9] = {0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02};
@@ -1824,9 +1821,7 @@ static void
 do_notify_sb_failure(uint8_t *comm_buf)
 {
     uint8_t *ptr;
-    pid_t pid;
-    char vm_uuid[sizeof("vm-uuid=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")];
-    EFI_STATUS status = EFI_SUCCESS;
+    bool ret;
     static bool called;
 
     /*
@@ -1845,39 +1840,10 @@ do_notify_sb_failure(uint8_t *comm_buf)
     unserialize_uint32(&ptr); /* version */
     unserialize_command(&ptr);
 
-    if (snprintf(vm_uuid, sizeof(vm_uuid),
-                 "vm-uuid=%s", xapidb_arg_uuid) >= sizeof(vm_uuid)) {
-        ptr = comm_buf;
-        serialize_result(&ptr, EFI_DEVICE_ERROR);
-        return;
-    }
-
-    /* Create a XAPI message by calling the cmdline utility. */
-    pid = fork();
-    if (pid == -1) {
-        ERR("Failed to fork(): %d, %s", errno, strerror(errno));
-        status = EFI_DEVICE_ERROR;
-    } else if (pid == 0) {
-        execlp("xe", "xe", "message-create", vm_uuid,
-               "name=VM_SECURE_BOOT_FAILED", "priority=5",
-               "body=The VM failed to pass Secure Boot verification.", NULL);
-        ERR("Failed to execlp(): %d, %s", errno, strerror(errno));
-        _exit(1);
-    } else {
-        int rv = 0;
-
-        waitpid(pid, &rv, 0);
-        if (rv) {
-            if (WIFEXITED(rv))
-                ERR("Process exited with status %d\n", WEXITSTATUS(rv));
-            else
-                ERR("Process exited abnormally with rv %d\n", rv);
-            status = EFI_DEVICE_ERROR;
-        }
-    }
+    ret = db->sb_notify();
 
     ptr = comm_buf;
-    serialize_result(&ptr, status);
+    serialize_result(&ptr, ret ? EFI_SUCCESS : EFI_DEVICE_ERROR);
 }
 
 void dispatch_command(uint8_t *comm_buf)
