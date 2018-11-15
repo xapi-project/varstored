@@ -7,9 +7,11 @@
 #include <stdint.h>
 #include <string.h>
 #include <ctype.h>
+#include <unistd.h>
 
 #include <backend.h>
 #include <debug.h>
+#include <depriv.h>
 #include <serialize.h>
 
 #include "tool-lib.h"
@@ -20,7 +22,9 @@ const enum log_level log_level = LOG_LVL_INFO;
 static void
 usage(const char *progname)
 {
-    printf("usage: %s [-h] <vm-uuid>\n", progname);
+    printf("usage: %s [-h] [depriv options] <vm-uuid>\n\n", progname);
+    printf("Lists the VM's EFI variables.\n");
+    print_depriv_options();
 }
 
 static void
@@ -99,17 +103,37 @@ do_ls(void)
 
 int main(int argc, char **argv)
 {
-    if (argc != 2) {
+    DEPRIV_VARS
+
+    for (;;) {
+        int c = getopt(argc, argv, "h" DEPRIV_OPTS);
+
+        if (c == -1)
+            break;
+
+        switch (c) {
+        DEPRIV_CASES
+        case 'h':
+            usage(argv[0]);
+            exit(0);
+        default:
+            usage(argv[0]);
+            exit(1);
+        }
+    }
+
+    if (argc - optind != 1) {
         usage(argv[0]);
         exit(1);
     }
 
-    if (!strcmp(argv[1], "-h")) {
-        usage(argv[0]);
-        exit(0);
-    }
+    db->parse_arg("uuid", argv[optind]);
 
-    db->parse_arg("uuid", argv[1]);
+    if (opt_socket)
+        db->parse_arg("socket", opt_socket);
+
+    if (!drop_privileges(opt_chroot, opt_depriv, opt_gid, opt_uid))
+        exit(1);
 
     if (!tool_init())
         exit(1);

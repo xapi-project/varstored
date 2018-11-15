@@ -13,12 +13,14 @@
 static bool
 xapidb_cmdline_parse_arg(const char *name, const char *val)
 {
-    if (!strcmp(name, "uuid")) {
+    if (!strcmp(name, "uuid"))
         xapidb_arg_uuid = strdup(val);
-        return true;
-    } else {
+    else if (!strcmp(name, "socket"))
+        xapidb_arg_socket = strdup(val);
+    else
         return false;
-    }
+
+    return true;
 }
 
 static bool

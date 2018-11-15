@@ -14,6 +14,7 @@
 
 #include <backend.h>
 #include <debug.h>
+#include <depriv.h>
 #include <serialize.h>
 
 #include "tool-lib.h"
@@ -24,8 +25,16 @@ const enum log_level log_level = LOG_LVL_INFO;
 static void
 usage(const char *progname)
 {
-    printf("usage: %s [-h] <vm-uuid> <guid> <name> <attributes> <data-file>\n",
+    printf("usage: %s [-h] [depriv options] <vm-uuid> <guid> <name> <attributes> <data-file>\n\n",
            progname);
+    printf("Sets/updates/appends/removes an EFI variable for a VM.\n"
+           "attributes is a bitmask specified as a number. E.g. '7' for 'boot|runtime|nvram'.\n"
+           "Variables can be appended by specifying 'append' in the attributes.\n"
+           "Normal variables can be removed by providing an empty data-file or by\n"
+           "specifying neither 'boot' nor 'runtime' in the attributes.\n"
+           "Authenticated variables can be removed by providing a valid authentication\n"
+           "descriptor with no data.\n");
+    print_depriv_options();
 }
 
 static bool
@@ -104,20 +113,41 @@ do_set(const char *guid_str, const char *name, const char *attr_str,
 
 int main(int argc, char **argv)
 {
-    if (argc != 6) {
+    DEPRIV_VARS
+
+    for (;;) {
+        int c = getopt(argc, argv, "h" DEPRIV_OPTS);
+
+        if (c == -1)
+            break;
+
+        switch (c) {
+        DEPRIV_CASES
+        case 'h':
+            usage(argv[0]);
+            exit(0);
+        default:
+            usage(argv[0]);
+            exit(1);
+        }
+    }
+
+    if (argc - optind != 5) {
         usage(argv[0]);
         exit(1);
     }
 
-    if (!strcmp(argv[1], "-h")) {
-        usage(argv[0]);
-        exit(0);
-    }
+    db->parse_arg("uuid", argv[optind]);
 
-    db->parse_arg("uuid", argv[1]);
+    if (opt_socket)
+        db->parse_arg("socket", opt_socket);
+
+    if (!drop_privileges(opt_chroot, opt_depriv, opt_gid, opt_uid))
+        exit(1);
 
     if (!tool_init())
         exit(1);
 
-    return !do_set(argv[2], argv[3], argv[4], argv[5]);
+    return !do_set(argv[optind + 1], argv[optind + 2], argv[optind + 3],
+                   argv[optind + 4]);
 }

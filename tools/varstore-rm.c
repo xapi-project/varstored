@@ -14,6 +14,7 @@
 
 #include <backend.h>
 #include <debug.h>
+#include <depriv.h>
 #include <guid.h>
 #include <serialize.h>
 
@@ -27,7 +28,13 @@ const enum log_level log_level = LOG_LVL_INFO;
 static void
 usage(const char *progname)
 {
-    printf("usage: %s [-c] [-h] <vm-uuid> [<guid> <name>]\n", progname);
+    printf("usage: %s [-c] [-h] [depriv options] <vm-uuid> [<guid> <name>]\n\n",
+           progname);
+    printf("Removes an EFI variable (either normal or authenticated).\n"
+           "Alternatively, if -c is given then guid and name should not given\n"
+           "and it will remove all remove-on-clone variables configured in\n"
+           CLONE_RM_DIR ".\n");
+    print_depriv_options();
 }
 
 static bool
@@ -191,14 +198,16 @@ out:
 int main(int argc, char **argv)
 {
     bool clone_rm = false;
+    DEPRIV_VARS
 
     for (;;) {
-        int c = getopt(argc, argv, "ch");
+        int c = getopt(argc, argv, "ch" DEPRIV_OPTS);
 
         if (c == -1)
             break;
 
         switch (c) {
+        DEPRIV_CASES
         case 'c':
             clone_rm = true;
             break;
@@ -217,6 +226,12 @@ int main(int argc, char **argv)
     }
 
     db->parse_arg("uuid", argv[optind]);
+
+    if (opt_socket)
+        db->parse_arg("socket", opt_socket);
+
+    if (!drop_privileges(opt_chroot, opt_depriv, opt_gid, opt_uid))
+        exit(1);
 
     if (!tool_init())
         exit(1);

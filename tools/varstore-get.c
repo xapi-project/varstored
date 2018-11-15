@@ -11,6 +11,7 @@
 
 #include <backend.h>
 #include <debug.h>
+#include <depriv.h>
 #include <serialize.h>
 
 #include "tool-lib.h"
@@ -21,7 +22,11 @@ const enum log_level log_level = LOG_LVL_INFO;
 static void
 usage(const char *progname)
 {
-    printf("usage: %s [-h] [-a] <vm-uuid> <guid> <name>\n", progname);
+    printf("usage: %s [-h] [depriv options] [-a] <vm-uuid> <guid> <name>\n\n",
+           progname);
+    printf("Writes out the contents of an EFI variable to stdout.\n"
+           "If -a is given, writes out the variable attributes instead.\n");
+    print_depriv_options();
 }
 
 #define print_attr(x) do { \
@@ -96,14 +101,16 @@ do_get(const char *guid_str, const char *name, bool show_attr)
 int main(int argc, char **argv)
 {
     bool show_attr = false;
+    DEPRIV_VARS
 
     for (;;) {
-        int c = getopt(argc, argv, "ah");
+        int c = getopt(argc, argv, "ah" DEPRIV_OPTS);
 
         if (c == -1)
             break;
 
         switch (c) {
+        DEPRIV_CASES
         case 'a':
             show_attr = true;
             break;
@@ -122,6 +129,12 @@ int main(int argc, char **argv)
     }
 
     db->parse_arg("uuid", argv[optind]);
+
+    if (opt_socket)
+        db->parse_arg("socket", opt_socket);
+
+    if (!drop_privileges(opt_chroot, opt_depriv, opt_gid, opt_uid))
+        exit(1);
 
     if (!tool_init())
         exit(1);

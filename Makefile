@@ -1,6 +1,7 @@
 TARGET = varstored
 
 OBJS :=	guid.o \
+	depriv.o \
 	handler.o \
 	io_port.o \
 	varstored.o \
@@ -53,8 +54,13 @@ $(TARGET): $(LIBS) $(OBJS)
 %.o: %.c
 	gcc -o $@ $(CFLAGS) -c $<
 
-TOOLLIBS := -lcrypto $$(pkg-config --libs libxml-2.0)
-TOOLOBJS := tools/xapidb-cmdline.o tools/tool-lib.o guid.o handler.o xapidb-lib.o
+TOOLLIBS := -lcrypto -lseccomp $$(pkg-config --libs libxml-2.0)
+TOOLOBJS := tools/xapidb-cmdline.o \
+            tools/tool-lib.o \
+            depriv.o \
+            guid.o \
+            handler.o \
+            xapidb-lib.o
 TOOLS := tools/varstore-ls tools/varstore-get tools/varstore-rm tools/varstore-set
 
 tools: $(TOOLS)

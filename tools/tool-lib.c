@@ -250,3 +250,14 @@ parse_name(const char *in, uint8_t *name)
 
     return len * 2;
 }
+
+void
+print_depriv_options(void)
+{
+    printf("\nOptions to reduce privileges when running:\n"
+           "  [-d] - reduce privileges\n"
+           "  [-g] <gid> - change process group\n"
+           "  [-r] <chroot> - enter a chroot\n"
+           "  [-s] <path> - use given path to toolstack socket (this is relative to the chroot, if any)\n"
+           "  [-u] <uid> - change process user\n");
+}
