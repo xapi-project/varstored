@@ -41,6 +41,11 @@ io_port_writel(uint64_t offset, uint32_t val)
     void *shmem;
     int i;
 
+    if (offset != 0) {
+        DBG("Unexpected offset: %lu\n", offset);
+        return;
+    }
+
     for (i = 0; i < SHMEM_PAGES; i++)
         pfns[i] = val + i;
 

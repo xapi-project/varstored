@@ -176,7 +176,7 @@ initialize_settings(struct xs_handle *xsh, domid_t domid)
 }
 
 static bool
-xs_write_pid(struct xs_handle *xsh, domid_t domid)
+xs_write_pid(struct xs_handle *xsh)
 {
     char *varstore_pid = NULL;
     char *key = NULL;
@@ -683,7 +683,7 @@ varstored_initialize(domid_t domid)
 
     initialize_settings(xsh, varstored_state.domid);
 
-    if (!xs_write_pid(xsh, varstored_state.domid)) {
+    if (!xs_write_pid(xsh)) {
         ERR("Failed to write pid to xenstore: %d, %s\n", errno, strerror(errno));
         goto err;
     }
@@ -831,7 +831,7 @@ varstored_poll_iopages(void)
 }
 
 int
-main(int argc, char **argv, char **envp)
+main(int argc, char **argv)
 {
     char            *domain_str;
     char            *ptr;

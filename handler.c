@@ -647,8 +647,7 @@ enum auth_type {
 };
 
 static EFI_STATUS
-check_signature_list_format(uint8_t *name, UINTN name_len,
-                            uint8_t *data, UINTN data_len, bool is_pk)
+check_signature_list_format(uint8_t *data, UINTN data_len, bool is_pk)
 {
     EFI_SIGNATURE_LIST *sig_list;
     int count;
@@ -1110,8 +1109,7 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
         if (status != EFI_SUCCESS)
             goto out;
 
-        status = check_signature_list_format(name, name_len,
-                                             *payload_out, *payload_len_out,
+        status = check_signature_list_format(*payload_out, *payload_len_out,
                                              true);
         if (status != EFI_SUCCESS)
             goto out;
@@ -1182,8 +1180,7 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
                                       payload_out, payload_len_out,
                                       digest, timestamp);
         if (status == EFI_SUCCESS)
-            status = check_signature_list_format(name, name_len,
-                                                 *payload_out, *payload_len_out,
+            status = check_signature_list_format(*payload_out, *payload_len_out,
                                                  false);
     } else if (!memcmp(guid, &gEfiImageSecurityDatabaseGuid, GUID_LEN) &&
                ((name_len == sizeof(EFI_IMAGE_SECURITY_DATABASE) &&
@@ -1216,8 +1213,7 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
         }
 
         if (status == EFI_SUCCESS)
-            status = check_signature_list_format(name, name_len,
-                                                 *payload_out, *payload_len_out,
+            status = check_signature_list_format(*payload_out, *payload_len_out,
                                                  false);
     } else {
         status = verify_auth_var_type(name, name_len,
