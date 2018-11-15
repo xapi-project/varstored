@@ -21,8 +21,8 @@
 
 #define CLONE_RM_DIR "/etc/xapi.d/efi-clone"
 
-struct backend *db = &xapidb_cmdline;
-enum log_level log_level = LOG_LVL_INFO;
+const struct backend *db = &xapidb_cmdline;
+const enum log_level log_level = LOG_LVL_INFO;
 
 static void
 usage(const char *progname)

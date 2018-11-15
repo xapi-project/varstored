@@ -30,8 +30,8 @@ struct backend {
     bool (*sb_notify)(void);
 };
 
-extern struct backend *db;
-extern struct backend xapidb;
-extern struct backend xapidb_cmdline;
+extern const struct backend *db;
+extern const struct backend xapidb;
+extern const struct backend xapidb_cmdline;
 
 #endif

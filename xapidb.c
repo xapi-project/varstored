@@ -133,7 +133,7 @@ xapidb_resume(void)
     return ret;
 }
 
-struct backend xapidb = {
+const struct backend xapidb = {
     .parse_arg = xapidb_parse_arg,
     .check_args = xapidb_check_args,
     .init = xapidb_init,

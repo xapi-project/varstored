@@ -32,7 +32,7 @@ xapidb_cmdline_check_args(void)
     return true;
 }
 
-struct backend xapidb_cmdline = {
+const struct backend xapidb_cmdline = {
     .parse_arg = xapidb_cmdline_parse_arg,
     .check_args = xapidb_cmdline_check_args,
     .init = xapidb_init,

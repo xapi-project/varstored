@@ -99,13 +99,13 @@ static const char *varstored_option_text[] = {
 static sig_atomic_t run_main_loop = 1;
 
 static const char *prog;
-struct backend *db;
+const struct backend *db;
 bool opt_resume;
 static bool opt_depriv;
 static uid_t opt_uid;
 static gid_t opt_gid;
 static char *opt_chroot;
-enum log_level log_level = LOG_LVL_INFO;
+const enum log_level log_level = LOG_LVL_INFO;
 
 static void __attribute__((noreturn))
 usage(void)

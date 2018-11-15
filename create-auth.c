@@ -27,7 +27,7 @@
  * is ephemeral.
  */
 
-static EFI_GUID citrix_guid =
+static const EFI_GUID citrix_guid =
     {{0x35, 0xc5, 0xac, 0xc0, 0xc8, 0x25, 0x46, 0x64, 0x92, 0x5b, 0x5d, 0xd7, 0xd0, 0xb2, 0xf5, 0xaa}};
 
 /* Converts an array of X509 certificates into an EFI_SIGNATURE_LIST */
@@ -81,9 +81,9 @@ certs_to_sig_list(X509 **cert, int count, UINTN *data_len)
 
 /* Returns a signature suitable for a time-based authenticated write. */
 static uint8_t *
-sign_data(X509 *cert, EVP_PKEY *key, uint8_t *name, UINTN name_len,
-          EFI_GUID *guid, UINT32 attr, EFI_TIME *timestamp, uint8_t *data,
-          UINTN data_len, UINTN *sig_len)
+sign_data(X509 *cert, EVP_PKEY *key, const uint8_t *name, UINTN name_len,
+          const EFI_GUID *guid, UINT32 attr, EFI_TIME *timestamp,
+          const uint8_t *data, UINTN data_len, UINTN *sig_len)
 {
     UINTN len;
     int p7_len;
@@ -197,7 +197,7 @@ int main(int argc, char **argv)
     X509 **cert;
     UINTN name_len, data_len, sig_len, descriptor_len;
     uint8_t *name, *data, *sig, *descriptor;
-    EFI_GUID *guid;
+    const EFI_GUID *guid;
     char *out_file;
     EFI_TIME timestamp;
     UINT32 attr = ATTR_BRNV | EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS;

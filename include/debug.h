@@ -12,7 +12,7 @@ enum log_level {
     LOG_LVL_DEBUG,
 };
 
-extern enum log_level log_level;
+extern const enum log_level log_level;
 
 #define ERR(...)                                \
     do {                                        \

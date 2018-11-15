@@ -11,7 +11,7 @@
 
 static char *save_name = "test.dat";
 
-enum log_level log_level = LOG_LVL_ERROR;
+const enum log_level log_level = LOG_LVL_ERROR;
 
 /* The communication buffer. */
 static uint8_t buf[16 * 4096];
@@ -23,33 +23,35 @@ typedef struct {
     size_t length;
 } dstring;
 
-static EFI_GUID nullguid = {{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
+static const EFI_GUID nullguid =
+    {{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}};
 
 /* Sample data */
 static dstring *tname1;
 
-static EFI_GUID tguid1 =
+static const EFI_GUID tguid1 =
     {{1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}};
-static uint8_t tdata1[] = {1, 0, 5, 6, 7};
+static const uint8_t tdata1[] = {1, 0, 5, 6, 7};
 
 static dstring *tname2;
-static EFI_GUID tguid2 =
+static const EFI_GUID tguid2 =
     {{1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}};
-static uint8_t tdata2[] = {0, 8, 6, 9, 0, 4, 5};
+static const uint8_t tdata2[] = {0, 8, 6, 9, 0, 4, 5};
 
 static dstring *tname3;
-static EFI_GUID tguid3 = {{6, 4, 5, 7, 3, 8, 9, 1, 3, 2, 3, 4, 5, 6, 7, 8}};
+static const EFI_GUID tguid3 =
+    {{6, 4, 5, 7, 3, 8, 9, 1, 3, 2, 3, 4, 5, 6, 7, 8}};
 static uint8_t tdata3[] = {9};
 
 static dstring *tname4;
-static EFI_GUID tguid4 =
+static const EFI_GUID tguid4 =
     {{7, 4, 3, 2, 1, 7, 9, 10, 15, 2, 5, 6, 14, 15, 10, 1}};
-static uint8_t tdata4[] = {10, 255, 0, 6, 7, 8, 120, 244};
+static const uint8_t tdata4[] = {10, 255, 0, 6, 7, 8, 120, 244};
 
 static dstring *tname5;
-static EFI_GUID tguid5 =
+static const EFI_GUID tguid5 =
     {{1, 3, 5, 7, 9, 8, 6, 4, 2, 10, 11, 12, 13, 14, 15, 0}};
-static uint8_t tdata5[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+static const uint8_t tdata5[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
 static dstring *signatureSupport_name;
 static dstring *auditMode_name;
@@ -62,12 +64,12 @@ static dstring *db_name;
 static dstring *dbx_name;
 static dstring *dbt_name;
 
-static EFI_GUID testOwnerGuid = {{7, 5, 3, 8, 9, 6, 1, 3,
-                                  2, 3, 4, 5, 4, 6, 7, 8}};
+static const EFI_GUID testOwnerGuid =
+    {{7, 5, 3, 8, 9, 6, 1, 3, 2, 3, 4, 5, 4, 6, 7, 8}};
 
-EFI_TIME test_timea = {2018, 6, 20, 13, 38, 1, 0, 0, 0, 0, 0};
-EFI_TIME test_timeb = {2018, 6, 20, 13, 38, 2, 0, 0, 0, 0, 0};
-EFI_TIME test_timec = {2018, 6, 20, 13, 38, 3, 0, 0, 0, 0, 0};
+static const EFI_TIME test_timea = {2018, 6, 20, 13, 38, 1, 0, 0, 0, 0, 0};
+static const EFI_TIME test_timeb = {2018, 6, 20, 13, 38, 2, 0, 0, 0, 0, 0};
+static const EFI_TIME test_timec = {2018, 6, 20, 13, 38, 3, 0, 0, 0, 0, 0};
 
 static EFI_SIGNATURE_LIST *certA;
 static size_t certA_len;
@@ -235,7 +237,7 @@ static bool testdb_save(void)
     return true;
 }
 
-struct backend testdb = {
+const struct backend testdb = {
     .parse_arg = NULL,
     .check_args = NULL,
     .init = testdb_init,
@@ -243,7 +245,7 @@ struct backend testdb = {
     .resume = NULL,
     .set_variable = testdb_save,
 };
-struct backend *db = &testdb;
+const struct backend *db = &testdb;
 
 static void read_x509_into_CertList(char *certfile,
                                     EFI_SIGNATURE_LIST **ret_cert, size_t *len);
@@ -395,8 +397,9 @@ static void call_set_variable(const dstring *name, const EFI_GUID *guid,
  */
 static EFI_STATUS setVariable_check_line(const dstring *name,
                                          const EFI_GUID *guid,
-                                         uint8_t *data, UINTN len, UINT32 attr,
-                                         EFI_STATUS expected, int line)
+                                         const uint8_t *data, UINTN len,
+                                         UINT32 attr, EFI_STATUS expected,
+                                         int line)
 {
     uint8_t *ptr;
     EFI_STATUS status;
@@ -433,10 +436,14 @@ struct sign_details
     char *digest;
 };
 
-struct sign_details sign_testPK = {"testPK.pem", "testPK.key", "SHA256"};
-struct sign_details sign_bad_digest = {"testPK.pem", "testPK.key", "SHA224"};
-struct sign_details sign_certB = {"testcertB.pem", "testcertB.key", "SHA256"};
-struct sign_details sign_mixed_keys = {"testPK.pem", "testcertB.key", "SHA256"};
+static const struct sign_details sign_testPK =
+    {"testPK.pem", "testPK.key", "SHA256"};
+static const struct sign_details sign_bad_digest =
+    {"testPK.pem", "testPK.key", "SHA224"};
+static const struct sign_details sign_certB =
+    {"testcertB.pem", "testcertB.key", "SHA256"};
+static const struct sign_details sign_mixed_keys =
+    {"testPK.pem", "testcertB.key", "SHA256"};
 
 static void setup_ssl(void)
 {
@@ -643,7 +650,8 @@ static size_t sign(uint8_t **signed_buf, const dstring *varname,
 static void sign_and_check_(const dstring *varname, const EFI_GUID *vendor_guid,
                             UINT32 attributes, const EFI_TIME *timestamp,
                             const uint8_t *data, size_t data_size,
-                            struct sign_details *sd, EFI_STATUS expected, int line)
+                            const struct sign_details *sd, EFI_STATUS expected,
+                            int line)
 {
     uint8_t *sign_buffer;
     int len;

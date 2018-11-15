@@ -60,7 +60,7 @@
 struct auth_info {
     const uint8_t *name;
     UINTN name_len;
-    EFI_GUID *guid;
+    const EFI_GUID *guid;
     const char *path;
     bool append;
     uint8_t *data;
@@ -68,16 +68,16 @@ struct auth_info {
 };
 
 /* Some values from edk2. */
-const uint8_t mOidValue[9] = {0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02};
-const uint8_t mSignatureSupport[] = {
+static const uint8_t mOidValue[9] = {0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02};
+static const uint8_t mSignatureSupport[] = {
     0x12,0xa5,0x6c,0x82,0x10,0xcf,0xc9,0x4a,0xb1,0x87,0xbe,0x01,0x49,0x66,0x31,0xbd, /* EFI_CERT_SHA1_GUID */
     0x26,0x16,0xc4,0xc1,0x4c,0x50,0x92,0x40,0xac,0xa9,0x41,0xf9,0x36,0x93,0x43,0x28, /* EFI_CERT_SHA256_GUID */
     0xe8,0x66,0x57,0x3c,0x9c,0x26,0x34,0x4e,0xaa,0x14,0xed,0x77,0x6e,0x85,0xb3,0xb6, /* EFI_CERT_RSA2048_GUID */
     0xa1,0x59,0xc0,0xa5,0xe4,0x94,0xa7,0x4a,0x87,0xb5,0xab,0x15,0x5c,0x2b,0xf0,0x72, /* EFI_CERT_X509_GUID */
 };
 
-const uint8_t mSha256OidValue[] = {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01};
-const EFI_SIGNATURE_ITEM mSupportSigItem[] = {
+static const uint8_t mSha256OidValue[] = {0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01};
+static const EFI_SIGNATURE_ITEM mSupportSigItem[] = {
     {{{0x26, 0x16, 0xc4, 0xc1, 0x4c, 0x50, 0x92, 0x40, 0xac, 0xa9, 0x41, 0xf9, 0x36, 0x93, 0x43, 0x28}}, 0, 32           }, /* EFI_CERT_SHA256_GUID */
     {{{0xe8, 0x66, 0x57, 0x3c, 0x9c, 0x26, 0x34, 0x4e, 0xaa, 0x14, 0xed, 0x77, 0x6e, 0x85, 0xb3, 0xb6}}, 0, 256          }, /* EFI_CERT_RSA2048_GUID */
     {{{0x90, 0x61, 0xb3, 0xe2, 0x9b, 0x87, 0x3d, 0x4a, 0xad, 0x8d, 0xf2, 0xe7, 0xbb, 0xa3, 0x27, 0x84}}, 0, 256          }, /* EFI_CERT_RSA2048_SHA256_GUID */
@@ -94,16 +94,16 @@ const EFI_SIGNATURE_ITEM mSupportSigItem[] = {
 
 #define NUM_OF_SUPPORTED_SIG_ITEMS    (sizeof(mSupportSigItem) / sizeof(EFI_SIGNATURE_ITEM))
 
-const uint8_t EFI_SETUP_MODE_NAME[] = {'S',0,'e',0,'t',0,'u',0,'p',0,'M',0,'o',0,'d',0,'e',0};
-const uint8_t EFI_AUDIT_MODE_NAME[] = {'A',0,'u',0,'d',0,'i',0,'t',0,'M',0,'o',0,'d',0,'e',0};
-const uint8_t EFI_DEPLOYED_MODE_NAME[] = {'D',0,'e',0,'p',0,'l',0,'o',0,'y',0,'e',0,'d',0,'M',0,'o',0,'d',0,'e',0};
-const uint8_t EFI_PLATFORM_KEY_NAME[] = {'P',0,'K',0};
-const uint8_t EFI_KEY_EXCHANGE_KEY_NAME[] = {'K',0,'E',0,'K',0};
-const uint8_t EFI_SECURE_BOOT_MODE_NAME[] = {'S',0,'e',0,'c',0,'u',0,'r',0,'e',0,'B',0,'o',0,'o',0,'t',0};
-const uint8_t EFI_SIGNATURE_SUPPORT_NAME[] = {'S',0,'i',0,'g',0,'n',0,'a',0,'t',0,'u',0,'r',0,'e',0,'S',0,'u',0,'p',0,'p',0,'o',0,'r',0,'t',0};
-const uint8_t EFI_IMAGE_SECURITY_DATABASE[] = {'d',0,'b',0};
-const uint8_t EFI_IMAGE_SECURITY_DATABASE1[] = {'d',0,'b',0,'x',0};
-const uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
+static const uint8_t EFI_SETUP_MODE_NAME[] = {'S',0,'e',0,'t',0,'u',0,'p',0,'M',0,'o',0,'d',0,'e',0};
+static const uint8_t EFI_AUDIT_MODE_NAME[] = {'A',0,'u',0,'d',0,'i',0,'t',0,'M',0,'o',0,'d',0,'e',0};
+static const uint8_t EFI_DEPLOYED_MODE_NAME[] = {'D',0,'e',0,'p',0,'l',0,'o',0,'y',0,'e',0,'d',0,'M',0,'o',0,'d',0,'e',0};
+static const uint8_t EFI_PLATFORM_KEY_NAME[] = {'P',0,'K',0};
+static const uint8_t EFI_KEY_EXCHANGE_KEY_NAME[] = {'K',0,'E',0,'K',0};
+static const uint8_t EFI_SECURE_BOOT_MODE_NAME[] = {'S',0,'e',0,'c',0,'u',0,'r',0,'e',0,'B',0,'o',0,'o',0,'t',0};
+static const uint8_t EFI_SIGNATURE_SUPPORT_NAME[] = {'S',0,'i',0,'g',0,'n',0,'a',0,'t',0,'u',0,'r',0,'e',0,'S',0,'u',0,'p',0,'p',0,'o',0,'r',0,'t',0};
+static const uint8_t EFI_IMAGE_SECURITY_DATABASE[] = {'d',0,'b',0};
+static const uint8_t EFI_IMAGE_SECURITY_DATABASE1[] = {'d',0,'b',0,'x',0};
+static const uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
 
 /*
  * A single variable takes up a minimum number of bytes.
@@ -147,7 +147,7 @@ get_space_usage(void)
 
 /* A limited version of SetVariable for internal use. */
 static EFI_STATUS
-internal_set_variable(const uint8_t *name, UINTN name_len, EFI_GUID *guid,
+internal_set_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
                       const uint8_t *data, UINTN data_len, UINT32 attr)
 {
     struct efi_variable *l;
@@ -196,7 +196,7 @@ internal_set_variable(const uint8_t *name, UINTN name_len, EFI_GUID *guid,
 
 /* A limited version of GetVariable for internal use. */
 static EFI_STATUS
-internal_get_variable(const uint8_t *name, UINTN name_len, EFI_GUID *guid,
+internal_get_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
                       uint8_t **data, UINTN *data_len)
 {
     struct efi_variable *l;
@@ -1977,7 +1977,7 @@ setup_variables(void)
 }
 
 static bool
-set_variable_from_auth(const uint8_t *name, UINTN name_len, EFI_GUID *guid,
+set_variable_from_auth(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
                        const uint8_t *data, off_t data_len, bool append)
 {
     uint8_t buf[SHMEM_SIZE];
