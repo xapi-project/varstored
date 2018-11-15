@@ -314,8 +314,6 @@ varstored_teardown(void)
     xenevtchn_close(varstored_state.evth);
 }
 
-static struct sigaction sigterm_handler;
-
 static void
 varstored_sigterm(int num)
 {
@@ -327,16 +325,6 @@ varstored_sigterm(int num)
         run_main_loop = 0;
     else
         exit(0);
-}
-
-static struct sigaction sigusr1_handler;
-
-static void
-varstored_sigusr1(int num)
-{
-    INFO("%s\n", strsignal(num));
-
-    sigaction(SIGHUP, &sigusr1_handler, NULL);
 }
 
 /* This blacklist is based on the one used by QEMU. */
@@ -833,6 +821,7 @@ varstored_poll_iopages(void)
 int
 main(int argc, char **argv)
 {
+    struct sigaction sigterm_handler;
     char            *domain_str;
     char            *ptr;
     int             index;
@@ -964,12 +953,6 @@ main(int argc, char **argv)
 
     sigaction(SIGABRT, &sigterm_handler, NULL);
     sigdelset(&block, SIGABRT);
-
-    memset(&sigusr1_handler, 0, sizeof (struct sigaction));
-    sigusr1_handler.sa_handler = varstored_sigusr1;
-
-    sigaction(SIGUSR1, &sigusr1_handler, NULL);
-    sigdelset(&block, SIGUSR1);
 
     sigprocmask(SIG_BLOCK, &block, NULL);
 
