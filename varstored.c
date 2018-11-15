@@ -983,7 +983,7 @@ main(int argc, char **argv)
     pfd.revents = 0;
 
     while (run_main_loop) {
-        rc = poll(&pfd, 1, 5000);
+        rc = poll(&pfd, 1, -1);
 
         if (!run_main_loop)
             break;
