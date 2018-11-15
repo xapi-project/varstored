@@ -14,7 +14,12 @@ CFLAGS += -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -D_GNU_SOURCE
 
 CFLAGS += $$(pkg-config --cflags libxml-2.0)
 
-CFLAGS += -Wall -g -O2
+CFLAGS += -g -O2 -std=gnu99 \
+          -Wall \
+          -Wstrict-prototypes \
+          -Wold-style-declaration \
+          -Wmissing-prototypes \
+          -Wunused
 
 ifeq ($(shell uname),Linux)
 LDLIBS := -lutil -lrt
