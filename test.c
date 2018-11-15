@@ -52,6 +52,8 @@ static EFI_GUID tguid5 =
 static uint8_t tdata5[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
 
 static dstring *signatureSupport_name;
+static dstring *auditMode_name;
+static dstring *deployedMode_name;
 static dstring *setupMode_name;
 static dstring *secureBoot_name;
 static dstring *PK_name;
@@ -255,6 +257,8 @@ static void setup_globals(void)
     tname5 = alloc_dstring("xyzabcdefgh");
 
     signatureSupport_name = alloc_dstring("SignatureSupport");
+    auditMode_name = alloc_dstring("AuditMode");
+    deployedMode_name = alloc_dstring("DeployedMode");
     setupMode_name = alloc_dstring("SetupMode");
     secureBoot_name = alloc_dstring("SecureBoot");
     PK_name = alloc_dstring("PK");
@@ -280,6 +284,8 @@ static void free_globals(void)
     free_dstring(tname5);
 
     free_dstring(signatureSupport_name);
+    free_dstring(auditMode_name);
+    free_dstring(deployedMode_name);
     free_dstring(setupMode_name);
     free_dstring(secureBoot_name);
     free_dstring(PK_name);
@@ -1619,6 +1625,58 @@ static void test_set_variable_non_volatile(void)
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 }
 
+static void test_set_variable_special_vars(void)
+{
+    int i;
+    dstring *vars[] = {auditMode_name, deployedMode_name, setupMode_name,
+                      secureBoot_name, signatureSupport_name};
+    UINT32 attrs[] = {ATTR_BR, ATTR_BR | EFI_VARIABLE_APPEND_WRITE,
+                      ATTR_BRNV, ATTR_BRNV_TIME, 0};
+
+    reset_vars();
+    setup_variables();
+
+    for (i = 0; i < ARRAY_SIZE(vars); i++) {
+        int j;
+        UINT32 attr;
+        EFI_STATUS status;
+        uint8_t *ptr = buf;
+
+        /* Check that special variables cannot be set/appended to. */
+        for (j = 0; j < ARRAY_SIZE(attrs); j++) {
+            sv_check(vars[i], &gEfiGlobalVariableGuid,
+                     tdata1, sizeof(tdata1), attrs[j], EFI_WRITE_PROTECTED);
+        }
+
+        /* Check that special variables cannot be removed. */
+        sv_check(vars[i], &gEfiGlobalVariableGuid,
+                 NULL, 0, ATTR_BR, EFI_WRITE_PROTECTED);
+
+        /* Check that special variables exist and their attr are correct. */
+        call_get_variable(vars[i], &gEfiGlobalVariableGuid, BSIZ, 0);
+
+        status = unserialize_uintn(&ptr); /* status */
+        g_assert_cmpuint(status, ==, EFI_SUCCESS);
+        attr = unserialize_uint32(&ptr); /* attr */
+        g_assert_cmpuint(attr, ==, ATTR_BR);
+    }
+
+    /* AuditMode must always be 0 in our implementation. */
+    check_variable_data(auditMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                        (uint8_t *)"\0", 1);
+
+    /* DeployedMode must always be 0 in our implementation. */
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                        (uint8_t *)"\0", 1);
+
+    /*
+     * The contents of SecureBoot and SetupMode are verified as part of the
+     * secure variable tests.
+     * The content of SignatureSupport is not verified since I don't know how
+     * to sensibly verify it and it is not worth the effort.
+     */
+}
+
 static void set_usermode()
 {
     /* Move into user mode by enrolling Platform Key. */
@@ -2373,6 +2431,8 @@ int main(int argc, char **argv)
                     test_set_variable_many_vars);
     g_test_add_func("/test/set_variable/non_volatile",
                     test_set_variable_non_volatile);
+    g_test_add_func("/test/set_variable/special_vars",
+                    test_set_variable_special_vars);
 
     g_test_add_func("/test/secure_set_variable/use_bad_digest",
                     test_use_bad_digest);
