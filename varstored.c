@@ -392,7 +392,6 @@ static const int seccomp_blacklist[] = {
 static bool
 drop_privileges(void)
 {
-    opt_depriv = true;
     if (opt_chroot) {
         if (chroot(opt_chroot) < 0) {
             ERR("Failed to chroot to %s: %d, %s\n", opt_chroot,
