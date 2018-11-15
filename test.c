@@ -1677,7 +1677,7 @@ static void test_set_variable_special_vars(void)
      */
 }
 
-static void set_usermode()
+static void set_usermode(void)
 {
     /* Move into user mode by enrolling Platform Key. */
 
@@ -1798,7 +1798,7 @@ static void test_secure_set_variable_setupmode(void)
     test_set_secure_variable();
 }
 
-static void test_secure_set_variable_usermode()
+static void test_secure_set_variable_usermode(void)
 {
     reset_vars();
     setup_variables();
@@ -1815,7 +1815,7 @@ static void test_secure_set_variable_usermode()
     test_set_secure_variable();
 }
 
-static void test_secure_set_PK()
+static void test_secure_set_PK(void)
 {
     EFI_SIGNATURE_LIST *joint_cert;
     size_t joint_len;
@@ -2165,7 +2165,7 @@ static void sig_db_check_multi(const dstring *key_db, const EFI_GUID *guid,
     free(combined_cert);
 }
 
-static void test_secure_set_KEK_setupmode()
+static void test_secure_set_KEK_setupmode(void)
 {
     uint8_t *ptr, *data, *data_ptr;
     EFI_STATUS status;
@@ -2210,7 +2210,7 @@ static void test_secure_set_KEK_setupmode()
     free(data);
 }
 
-static void test_secure_set_KEK_usermode()
+static void test_secure_set_KEK_usermode(void)
 {
     EFI_TIME test_time = {2018, 6, 20, 13, 38, 0, 0, 0, 0, 0, 0};
 
@@ -2288,17 +2288,17 @@ static void test_secure_set_db__setupmode(const dstring *key_db)
     test_duplicate_db(key_db, &gEfiImageSecurityDatabaseGuid, &test_time, true);
 }
 
-static void test_secure_set_db_setupmode()
+static void test_secure_set_db_setupmode(void)
 {
     test_secure_set_db__setupmode(db_name);
 }
 
-static void test_secure_set_dbx_setupmode()
+static void test_secure_set_dbx_setupmode(void)
 {
     test_secure_set_db__setupmode(dbx_name);
 }
 
-static void test_secure_set_dbt_setupmode()
+static void test_secure_set_dbt_setupmode(void)
 {
     test_secure_set_db__setupmode(dbt_name);
 }
@@ -2367,17 +2367,17 @@ static void test_secure_set_db__usermode(const dstring *key_db)
     free(combined_cert);
 }
 
-static void test_secure_set_db_usermode()
+static void test_secure_set_db_usermode(void)
 {
     test_secure_set_db__usermode(db_name);
 }
 
-static void test_secure_set_dbx_usermode()
+static void test_secure_set_dbx_usermode(void)
 {
     test_secure_set_db__usermode(dbx_name);
 }
 
-static void test_secure_set_dbt_usermode()
+static void test_secure_set_dbt_usermode(void)
 {
     test_secure_set_db__usermode(dbt_name);
 }
