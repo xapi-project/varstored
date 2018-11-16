@@ -58,6 +58,7 @@
 #include <handler.h>
 
 struct auth_info {
+    const char *pretty_name;
     const uint8_t *name;
     UINTN name_len;
     const EFI_GUID *guid;
@@ -115,13 +116,13 @@ static const uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
 #define AUTH_PATH_PREFIX "/usr/share/varstored"
 
 static struct auth_info auth_info[] = {
-    {EFI_PLATFORM_KEY_NAME, sizeof(EFI_PLATFORM_KEY_NAME),
+    {"PK", EFI_PLATFORM_KEY_NAME, sizeof(EFI_PLATFORM_KEY_NAME),
      &gEfiGlobalVariableGuid, AUTH_PATH_PREFIX "/PK.auth", false},
-    {EFI_KEY_EXCHANGE_KEY_NAME, sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
+    {"KEK", EFI_KEY_EXCHANGE_KEY_NAME, sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
      &gEfiGlobalVariableGuid, AUTH_PATH_PREFIX "/KEK.auth", false},
-    {EFI_IMAGE_SECURITY_DATABASE, sizeof(EFI_IMAGE_SECURITY_DATABASE),
+    {"db", EFI_IMAGE_SECURITY_DATABASE, sizeof(EFI_IMAGE_SECURITY_DATABASE),
      &gEfiImageSecurityDatabaseGuid, AUTH_PATH_PREFIX "/db.auth", false},
-    {EFI_IMAGE_SECURITY_DATABASE1, sizeof(EFI_IMAGE_SECURITY_DATABASE1),
+    {"dbx", EFI_IMAGE_SECURITY_DATABASE1, sizeof(EFI_IMAGE_SECURITY_DATABASE1),
      &gEfiImageSecurityDatabaseGuid, AUTH_PATH_PREFIX "/dbx.auth", true},
 };
 
@@ -2012,6 +2013,7 @@ setup_keys(void)
     int i;
 
     for (i = 0; i < ARRAY_SIZE(auth_info); i++) {
+        INFO("Setting %s...\n", auth_info[i].pretty_name);
         if (!set_variable_from_auth(auth_info[i].name,
                                     auth_info[i].name_len,
                                     auth_info[i].guid,

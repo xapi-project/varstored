@@ -4,11 +4,14 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <stddef.h>
 #include <string.h>
 #include <ctype.h>
 
 #include <backend.h>
 #include <handler.h>
+#include <guid.h>
+#include <serialize.h>
 
 #include "tool-lib.h"
 
@@ -260,4 +263,67 @@ print_depriv_options(void)
            "  [-r] <chroot> - enter a chroot\n"
            "  [-s] <path> - use given path to toolstack socket (this is relative to the chroot, if any)\n"
            "  [-u] <uid> - change process user\n");
+}
+
+bool
+do_rm(const EFI_GUID *guid, const char *name)
+{
+    uint8_t buf[SHMEM_SIZE];
+    uint8_t *ptr;
+    uint8_t variable_name[NAME_LIMIT];
+    EFI_STATUS status;
+    UINT32 attr;
+    size_t name_size;
+
+    name_size = parse_name(name, variable_name);
+
+    ptr = buf;
+    serialize_uint32(&ptr, 1); /* version */
+    serialize_uint32(&ptr, COMMAND_GET_VARIABLE);
+    serialize_data(&ptr, variable_name, name_size);
+    serialize_guid(&ptr, guid);
+    serialize_uintn(&ptr, DATA_LIMIT);
+    *ptr = 0;
+
+    dispatch_command(buf);
+
+    ptr = buf;
+    status = unserialize_uintn(&ptr);
+    if (status != EFI_SUCCESS) {
+        print_efi_error(status);
+        return false;
+    }
+
+    attr = unserialize_uint32(&ptr);
+
+    ptr = buf;
+    serialize_uint32(&ptr, 1); /* version */
+    serialize_uint32(&ptr, COMMAND_SET_VARIABLE);
+    serialize_data(&ptr, variable_name, name_size);
+    serialize_guid(&ptr, guid);
+
+    if (attr & EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS) {
+        EFI_VARIABLE_AUTHENTICATION_2 d = {{0}};
+
+        d.AuthInfo.Hdr.wCertificateType = WIN_CERT_TYPE_EFI_GUID;
+        d.AuthInfo.Hdr.dwLength = offsetof(WIN_CERTIFICATE_UEFI_GUID, CertData);
+        memcpy(&d.AuthInfo.CertType, &gEfiCertPkcs7Guid, GUID_LEN);
+        serialize_data(&ptr, (uint8_t *)&d,
+                       offsetof(EFI_VARIABLE_AUTHENTICATION_2, AuthInfo.CertData));
+    } else {
+        serialize_data(&ptr, NULL, 0);
+    }
+    serialize_uint32(&ptr, attr);
+    *ptr = 0;
+
+    dispatch_command(buf);
+
+    ptr = buf;
+    status = unserialize_uintn(&ptr);
+    if (status != EFI_SUCCESS) {
+        print_efi_error(status);
+        return false;
+    }
+
+    return true;
 }

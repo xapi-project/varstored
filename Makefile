@@ -61,7 +61,11 @@ TOOLOBJS := tools/xapidb-cmdline.o \
             guid.o \
             handler.o \
             xapidb-lib.o
-TOOLS := tools/varstore-ls tools/varstore-get tools/varstore-rm tools/varstore-set
+TOOLS := tools/varstore-ls \
+         tools/varstore-get \
+         tools/varstore-rm \
+         tools/varstore-set \
+         tools/varstore-sb-state
 
 tools: $(TOOLS)
 

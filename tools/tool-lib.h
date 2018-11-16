@@ -56,5 +56,6 @@ void print_efi_error(EFI_STATUS status);
 bool parse_guid(EFI_GUID *guid, const char *guid_str);
 size_t parse_name(const char *in, uint8_t *name);
 void print_depriv_options(void);
+bool do_rm(const EFI_GUID *guid, const char *name);
 
 #endif

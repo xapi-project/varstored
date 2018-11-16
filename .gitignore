@@ -16,3 +16,4 @@ varstore-get
 varstore-ls
 varstore-rm
 varstore-set
+varstore-sb-state
