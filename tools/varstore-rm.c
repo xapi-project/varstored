@@ -25,6 +25,16 @@
 const struct backend *db = &xapidb_cmdline;
 const enum log_level log_level = LOG_LVL_INFO;
 
+struct clone_variable
+{
+    EFI_GUID guid;
+    char *guid_str;
+    char *name;
+    struct clone_variable *next;
+};
+
+static struct clone_variable *clone_vars;
+
 static void
 usage(const char *progname)
 {
@@ -38,13 +48,13 @@ usage(const char *progname)
 }
 
 static bool
-clone_rm_one_file(const char *path)
+parse_one_clone_file(const char *path)
 {
     FILE *f;
-    EFI_GUID guid;
     /* GUID string length + maximum length of a name + some whitespace */
     char line[GUID_STR_LEN + NAME_MAX + 16];
     char *ptr, *end;
+    struct clone_variable *v;
 
     f = fopen(path, "r");
     if (!f) {
@@ -75,13 +85,27 @@ clone_rm_one_file(const char *path)
                 break;
         }
 
-        if (ptr >= end || !parse_guid(&guid, line)) {
+        v = malloc(sizeof(*v));
+        if (!v) {
+            ERR("Out of memory\n");
+            fclose(f);
+            return false;
+        }
+
+        if (ptr >= end || !parse_guid(&v->guid, line)) {
             fprintf(stderr, "Invalid format\n");
             fclose(f);
             return false;
         } else {
-            printf("Removing: GUID: '%s' Name: '%s'\n", line, ptr);
-            do_rm(&guid, ptr);
+            v->guid_str = strdup(line);
+            v->name = strdup(ptr);
+            if (!v->guid_str || !v->name) {
+                ERR("Out of memory\n");
+                fclose(f);
+                return false;
+            }
+            v->next = clone_vars;
+            clone_vars = v;
         }
     }
     fclose(f);
@@ -90,7 +114,7 @@ clone_rm_one_file(const char *path)
 }
 
 static bool
-do_clone_rm(void)
+parse_clone_files(void)
 {
     DIR *dir;
     struct dirent *d;
@@ -116,7 +140,7 @@ do_clone_rm(void)
             goto out;
         }
 
-        ret = clone_rm_one_file(path);
+        ret = parse_one_clone_file(path);
         if (!ret)
             goto out;
     }
@@ -124,6 +148,18 @@ do_clone_rm(void)
 out:
     closedir(dir);
     return ret;
+}
+
+static void
+do_rm_clone(void)
+{
+    struct clone_variable *v = clone_vars;
+
+    while (v) {
+        printf("Removing: GUID: '%s' Name: '%s'\n", v->guid_str, v->name);
+        do_rm(&v->guid, v->name);
+        v = v->next;
+    }
 }
 
 int main(int argc, char **argv)
@@ -161,6 +197,9 @@ int main(int argc, char **argv)
     if (opt_socket)
         db->parse_arg("socket", opt_socket);
 
+    if (clone_rm && !parse_clone_files())
+        return 1;
+
     if (!drop_privileges(opt_chroot, opt_depriv, opt_gid, opt_uid))
         exit(1);
 
@@ -168,7 +207,8 @@ int main(int argc, char **argv)
         exit(1);
 
     if (clone_rm) {
-        return !do_clone_rm();
+        do_rm_clone();
+        return 0;
     } else {
         EFI_GUID guid;
 
