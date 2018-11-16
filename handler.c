@@ -172,7 +172,7 @@ internal_set_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
         l = l->next;
     }
 
-    l = malloc(sizeof *l);
+    l = calloc(1, sizeof *l);
     if (!l) {
         free(new_data);
         return EFI_DEVICE_ERROR;
