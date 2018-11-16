@@ -55,6 +55,7 @@ parse_one_clone_file(const char *path)
     char line[GUID_STR_LEN + NAME_MAX + 16];
     char *ptr, *end;
     struct clone_variable *v;
+    int lineno = 0;
 
     f = fopen(path, "r");
     if (!f) {
@@ -64,6 +65,7 @@ parse_one_clone_file(const char *path)
     }
 
     while (fgets(line, sizeof(line), f)) {
+        lineno++;
         /* Strip newline */
         ptr = line + strlen(line) - 1;
         while (ptr >= line && (*ptr == '\r' || *ptr == '\n'))
@@ -93,7 +95,7 @@ parse_one_clone_file(const char *path)
         }
 
         if (ptr >= end || !parse_guid(&v->guid, line)) {
-            fprintf(stderr, "Invalid format\n");
+            fprintf(stderr, "Failed to parse line %d in '%s'.\n", lineno, path);
             fclose(f);
             return false;
         } else {
