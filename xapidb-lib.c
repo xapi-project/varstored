@@ -494,31 +494,37 @@ xapidb_set_variable(void)
 }
 
 static bool
-unserialize_variables(uint8_t **buf, size_t count)
+unserialize_variables(uint8_t **buf, size_t count, size_t rem)
 {
+#define VARIABLE_SIZE \
+    (sizeof(l->name_len) + sizeof(l->data_len) + sizeof(l->guid) + \
+     sizeof(l->attributes) + sizeof(l->timestamp) + sizeof(l->cert))
     struct efi_variable *l;
     size_t i;
 
     for (i = 0; i < count; i++) {
-        l = malloc(sizeof(*l));
+        l = calloc(1, sizeof(*l));
         if (!l) {
-            DBG("Failed to allocate memory\n");
+            ERR("Failed to allocate memory\n");
             return false;
         }
 
-        l->name = unserialize_data(buf, &l->name_len, NAME_LIMIT);
-        if (!l->name) {
-            DBG("Failed to allocate memory\n");
-            free(l);
-            return false;
-        }
-        l->data = unserialize_data(buf, &l->data_len, DATA_LIMIT);
-        if (!l->data) {
-            DBG("Failed to allocate memory\n");
-            free(l->name);
-            free(l);
-            return false;
-        }
+        if (rem < VARIABLE_SIZE)
+            goto invalid;
+        rem -= VARIABLE_SIZE;
+
+        l->name = unserialize_data(buf, &l->name_len,
+                                   rem < NAME_LIMIT ? rem : NAME_LIMIT);
+        if (!l->name)
+            goto invalid;
+        rem -= l->name_len;
+
+        l->data = unserialize_data(buf, &l->data_len,
+                                   rem < DATA_LIMIT ? rem : DATA_LIMIT);
+        if (!l->data)
+            goto invalid;
+        rem -= l->data_len;
+
         unserialize_guid(buf, &l->guid);
         l->attributes = unserialize_uint32(buf);
         unserialize_timestamp(buf, &l->timestamp);
@@ -529,7 +535,21 @@ unserialize_variables(uint8_t **buf, size_t count)
         var_list = l;
     }
 
+    if (rem) {
+        ERR("More data than expected: %lu\n", rem);
+        return false;
+    }
+
     return true;
+
+invalid:
+    ERR("Failed to unserialize variable!\n");
+    free(l->name);
+    free(l->data);
+    free(l);
+
+    return false;
+#undef VARIABLE_SIZE
 }
 
 bool
@@ -558,7 +578,7 @@ xapidb_parse_blob(uint8_t **buf, int len)
     count = unserialize_uintn(buf);
     unserialize_uintn(buf); /* data_len */
 
-    return unserialize_variables(buf, count);
+    return unserialize_variables(buf, count, len - DB_HEADER_LEN);
 }
 
 static bool
