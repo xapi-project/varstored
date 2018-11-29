@@ -2013,6 +2013,12 @@ setup_keys(void)
     int i;
 
     for (i = 0; i < ARRAY_SIZE(auth_info); i++) {
+        if (!auth_info[i].data) {
+            WARN("Cannot setup %s because auth data is missing!\n",
+                 auth_info[i].pretty_name);
+            continue;
+        }
+
         INFO("Setting %s...\n", auth_info[i].pretty_name);
         if (!set_variable_from_auth(auth_info[i].name,
                                     auth_info[i].name_len,
@@ -2035,12 +2041,17 @@ load_one_auth_data(const char *path, uint8_t **data_out, off_t *len)
 
     f = fopen(path, "r");
     if (!f) {
-        DBG("Failed to open '%s'\n", path);
-        return false;
+        if (errno == ENOENT) {
+            WARN("Auth file '%s' is missing!\n", path);
+            return true;
+        } else {
+            ERR("Failed to open '%s': %d, %s\n", path, errno, strerror(errno));
+            return true;
+        }
     }
 
     if (fstat(fileno(f), &st) == -1) {
-        DBG("Failed to stat '%s'\n", path);
+        ERR("Failed to stat '%s'\n", path);
         fclose(f);
         return false;
     }
@@ -2050,19 +2061,19 @@ load_one_auth_data(const char *path, uint8_t **data_out, off_t *len)
      * reading a malicously large file into memory.
      */
     if (st.st_size > DATA_LIMIT) {
-        DBG("Auth file '%s' is too large: %ld\n", path, st.st_size);
+        ERR("Auth file '%s' is too large: %ld\n", path, st.st_size);
         fclose(f);
         return false;
     }
 
     data = malloc(st.st_size);
     if (!data) {
-        DBG("Out of memory!\n");
+        ERR("Out of memory!\n");
         fclose(f);
         return false;
     }
     if (fread(data, 1, st.st_size, f) != st.st_size) {
-        DBG("Failed to read '%s'\n", path);
+        ERR("Failed to read '%s'\n", path);
         fclose(f);
         free(data);
         return false;
