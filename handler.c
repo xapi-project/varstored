@@ -139,15 +139,21 @@ static const uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
 
 #define AUTH_PATH_PREFIX "/usr/share/varstored"
 
+/*
+ * Array of auth_info structs containing the information about the keys
+ * we need. Avoid switching to user mode before importing other keys by
+ * importing PK key last, otherwise this would require signing other keys
+ * in Dom0.
+ */
 static struct auth_info auth_info[] = {
-    {"PK", EFI_PLATFORM_KEY_NAME, sizeof(EFI_PLATFORM_KEY_NAME),
-     &gEfiGlobalVariableGuid, AUTH_PATH_PREFIX "/PK.auth", false},
-    {"KEK", EFI_KEY_EXCHANGE_KEY_NAME, sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
-     &gEfiGlobalVariableGuid, AUTH_PATH_PREFIX "/KEK.auth", false},
-    {"db", EFI_IMAGE_SECURITY_DATABASE, sizeof(EFI_IMAGE_SECURITY_DATABASE),
-     &gEfiImageSecurityDatabaseGuid, AUTH_PATH_PREFIX "/db.auth", false},
     {"dbx", EFI_IMAGE_SECURITY_DATABASE1, sizeof(EFI_IMAGE_SECURITY_DATABASE1),
      &gEfiImageSecurityDatabaseGuid, AUTH_PATH_PREFIX "/dbx.auth", true},
+    {"db", EFI_IMAGE_SECURITY_DATABASE, sizeof(EFI_IMAGE_SECURITY_DATABASE),
+     &gEfiImageSecurityDatabaseGuid, AUTH_PATH_PREFIX "/db.auth", false},
+    {"KEK", EFI_KEY_EXCHANGE_KEY_NAME, sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
+     &gEfiGlobalVariableGuid, AUTH_PATH_PREFIX "/KEK.auth", false},
+    {"PK", EFI_PLATFORM_KEY_NAME, sizeof(EFI_PLATFORM_KEY_NAME),
+     &gEfiGlobalVariableGuid, AUTH_PATH_PREFIX "/PK.auth", false},
 };
 
 struct efi_variable *var_list;
