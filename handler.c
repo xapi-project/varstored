@@ -1472,6 +1472,23 @@ cmp_efi_variable(struct efi_variable *a, struct efi_variable *b)
     return true;
 }
 
+#if 0
+static void
+debug_all_variables(const struct efi_variable *l)
+{
+    if (log_level < LOG_LVL_DEBUG)
+        return;
+    fprintf(stderr, "Listing UEFI variables\n");
+    for(;l; l = l->next) {
+        for (int i = 0; i < l->name_len; i += 2) {
+            if (isprint(l->name[i]))
+                fprintf(stderr, "%c", (char)l->name[i]);
+        }
+        fprintf(stderr, "\n");
+    }
+}
+#endif
+
 static void
 do_set_variable(uint8_t *comm_buf)
 {
@@ -1592,6 +1609,12 @@ do_set_variable(uint8_t *comm_buf)
             }
 
             if ((data_len == 0 && !append) || !(attr & ATTR_BR)) {
+                if ((l->attributes & EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS) && 
+                    (l->attributes != attr)) {
+                    serialize_result(&ptr, EFI_INVALID_PARAMETER);
+                    goto err;
+                }
+
                 if (prev)
                     prev->next = l->next;
                 else
