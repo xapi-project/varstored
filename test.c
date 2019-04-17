@@ -1809,6 +1809,16 @@ static void test_set_secure_variable(void)
                         (uint8_t *)tosign_appended2_data,
                         strlen(tosign_appended2_data));
 
+    /* Try updating key with nothing and attr = 0 */
+    sign_and_check(tname1, &tguid1, 0, &test_timec,
+                  NULL, 0,
+                   &sign_testPK, EFI_INVALID_PARAMETER);
+
+    /* Check variable is the same */
+    check_variable_data(tname1, &tguid1, BSIZ, 0,
+                        (uint8_t *)tosign_appended2_data,
+                         strlen(tosign_appended2_data));
+
     /* try deleting */
     sign_and_check(tname1, &tguid1, ATTR_B_TIME, &test_timec, NULL, 0,
                    &sign_testPK, EFI_SUCCESS);
