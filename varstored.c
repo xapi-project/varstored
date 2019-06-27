@@ -157,6 +157,7 @@ typedef struct varstored_state {
     unsigned int vcpus;
     ioservid_t ioservid;
     bool ioserv_created;
+    xenforeignmemory_resource_handle *iores;
     shared_iopage_t *iopage;
     xc_evtchn_port_or_error_t *ioreq_local_port;
     buffered_iopage_t *buffered_iopage;
@@ -315,12 +316,9 @@ varstored_teardown(void)
                                               varstored_state.ioservid,
                                               0);
 
-    if (varstored_state.buffered_iopage)
-        xenforeignmemory_unmap(varstored_state.fmem,
-                               varstored_state.buffered_iopage, 1);
-
-    if (varstored_state.iopage)
-        xenforeignmemory_unmap(varstored_state.fmem, varstored_state.iopage, 1);
+    if (varstored_state.iores)
+        xenforeignmemory_unmap_resource(varstored_state.fmem,
+                                        varstored_state.iores);
 
     if (varstored_state.ioserv_created)
         xendevicemodel_destroy_ioreq_server(varstored_state.dmod,
@@ -351,12 +349,11 @@ varstored_initialize(domid_t domid)
     int rc, i, subcount = 0, first = 1;
     uint64_t number = 0;
     xc_dominfo_t dominfo;
-    xen_pfn_t pfn;
-    xen_pfn_t buf_pfn;
     evtchn_port_t port;
     evtchn_port_t buf_port;
     struct xs_handle *xsh = NULL;
     xc_interface *xch = NULL;
+    void *addr = NULL;
 
     varstored_state.buf_ioreq_local_port = -1;
     varstored_state.domid = domid;
@@ -444,36 +441,34 @@ varstored_initialize(domid_t domid)
     }
     varstored_state.ioserv_created = true;
 
+    varstored_state.iores = xenforeignmemory_map_resource(
+            varstored_state.fmem,
+            varstored_state.domid,
+            XENMEM_resource_ioreq_server,
+            varstored_state.ioservid, 0, 2,
+            &addr,
+            PROT_READ | PROT_WRITE, 0);
+    if (!varstored_state.iores) {
+        ERR("Failed to map ioreq server resource: %d, %s\n",
+            errno, strerror(errno));
+        goto err;
+    }
+
+    varstored_state.buffered_iopage = addr;
+    varstored_state.iopage = addr + PAGE_SIZE;
+
+    INFO("iopage = %p\n", varstored_state.iopage);
+    INFO("buffered_iopage = %p\n", varstored_state.buffered_iopage);
+
     rc = xendevicemodel_get_ioreq_server_info(varstored_state.dmod,
                                               varstored_state.domid,
                                               varstored_state.ioservid,
-                                              &pfn, &buf_pfn, &buf_port);
+                                              NULL, NULL, &buf_port);
     if (rc < 0) {
         ERR("Failed to get ioreq server info: %d, %s\n", errno, strerror(errno));
         goto err;
     }
     INFO("ioservid = %u\n", varstored_state.ioservid);
-
-    varstored_state.iopage = xenforeignmemory_map(varstored_state.fmem,
-                                                  varstored_state.domid,
-                                                  PROT_READ | PROT_WRITE,
-                                                  1, &pfn, NULL);
-    if (!varstored_state.iopage) {
-        ERR("Failed to map iopage: %d, %s\n", errno, strerror(errno));
-        goto err;
-    }
-    INFO("iopage = %p\n", varstored_state.iopage);
-
-    varstored_state.buffered_iopage = xenforeignmemory_map(
-                                          varstored_state.fmem,
-                                          varstored_state.domid,
-                                          PROT_READ | PROT_WRITE,
-                                          1, &buf_pfn, NULL);
-    if (!varstored_state.buffered_iopage) {
-        ERR("Failed to map buffered iopage: %d, %s\n", errno, strerror(errno));
-        goto err;
-    }
-    INFO("buffered_iopage = %p\n", varstored_state.buffered_iopage);
 
     rc = xendevicemodel_set_ioreq_server_state(varstored_state.dmod,
                                                varstored_state.domid,
