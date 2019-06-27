@@ -44,7 +44,7 @@ DEPS     = .*.d tools/.*.d
 
 LDFLAGS := -g 
 
-all: $(TARGET) tools auth
+all: $(TARGET) tools
 
 .PHONY: all
 
