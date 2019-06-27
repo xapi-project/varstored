@@ -173,33 +173,14 @@ static void
 initialize_settings(struct xs_handle *xsh, domid_t domid)
 {
     char path[64];
-    char *s = NULL;
-    int flag;
-    FILE *f;
+    char *s;
 
-    // read secureboot option from xenstore
     snprintf(path, sizeof(path), "/local/domain/%u/platform/secureboot", domid);
     s = xs_read(xsh, XBT_NULL, path, NULL);
     secure_boot_enable = s && !strcmp(s, "true");
-
-    if(secure_boot_enable) {
-        f = fopen("/etc/xenserver/feature.d/guefi-secureboot", "r");
-        if (!f) {
-            INFO(stderr, "Failed to open secureboot feature flag\n");
-        } else {
-            INFO("SECUREBOOT FEATURE FLAG EXISTS\n");
-            flag = fgetc(f);
-            if (flag == EOF || flag == '0')
-                secure_boot_enable = 0;
-            fclose(f);
-         }
-    }
-
-    if (secure_boot_enable)
-        INFO("SECURE_BOOT_ON\n");
-    else
-        INFO("SECURE_BOOT_OFF\n");
     free(s);
+
+    INFO("Secure boot enable: %s\n", secure_boot_enable ? "true" : "false");
 
     snprintf(path, sizeof(path),
              "/local/domain/%u/platform/auth-enforce", domid);
