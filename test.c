@@ -1809,9 +1809,12 @@ static void test_set_secure_variable(void)
                         (uint8_t *)tosign_appended2_data,
                         strlen(tosign_appended2_data));
 
-    /* Try updating key with nothing and attr = 0 */
+    /*
+     * Check authenticated variables cannot be deleted by unsetting attriubtes
+     * (2.7A page 248)
+     */
     sign_and_check(tname1, &tguid1, 0, &test_timec,
-                  NULL, 0,
+                   NULL, 0,
                    &sign_testPK, EFI_INVALID_PARAMETER);
 
     /* Check variable is the same */

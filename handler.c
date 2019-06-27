@@ -1609,6 +1609,10 @@ do_set_variable(uint8_t *comm_buf)
             }
 
             if ((data_len == 0 && !append) || !(attr & ATTR_BR)) {
+                /*
+                 * Authenticated variables cannot be deleted by unsetting
+                 * attributes. (2.7A page 248)
+                 */
                 if ((l->attributes & EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS) &&
                     (l->attributes != attr)) {
                     serialize_result(&ptr, EFI_INVALID_PARAMETER);
