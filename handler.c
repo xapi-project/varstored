@@ -762,7 +762,7 @@ check_signature_list_format(uint8_t *data, UINTN data_len, bool is_pk)
                     X509_free(cert);
                     return EFI_INVALID_PARAMETER;
                 }
-                ctx = RSAPublicKey_dup(pkey->pkey.rsa);
+                ctx = EVP_PKEY_get1_RSA(pkey);
                 fail = ctx == NULL;
                 RSA_free(ctx);
                 EVP_PKEY_free(pkey);
