@@ -48,7 +48,7 @@
 #include <serialize.h>
 #include <xapidb.h>
 
-#define MAX_HTTP_SIZE (128 * 1024)
+#define MAX_HTTP_SIZE (256 * 1024)
 
 #define HTTP_STATUS_OK 200
 

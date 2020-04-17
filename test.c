@@ -1499,10 +1499,12 @@ static void test_set_variable_resource_limit(void)
     g_assert_cmpuint(status, ==, EFI_OUT_OF_RESOURCES);
 
     sv_ok(tname1, &tguid1, tmp, DATA_LIMIT, ATTR_B);
+    sv_ok(tname4, &tguid4, tmp, DATA_LIMIT, ATTR_B);
 
     /* Use all the remaining space */
-    remaining = TOTAL_LIMIT - DATA_LIMIT - dstring_data_size(tname1) -
-                dstring_data_size(tname2) - 2 * VARIABLE_SIZE_OVERHEAD;
+    remaining = TOTAL_LIMIT - 2 * DATA_LIMIT - dstring_data_size(tname1) -
+                dstring_data_size(tname4) -
+                dstring_data_size(tname2) - 3 * VARIABLE_SIZE_OVERHEAD;
     sv_ok(tname2, &tguid2, tmp, remaining, ATTR_B);
 
     /* Cannot use any more space with a new variable */
