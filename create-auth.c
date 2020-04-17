@@ -53,10 +53,13 @@
 
 static const EFI_GUID citrix_guid =
     {{0x35, 0xc5, 0xac, 0xc0, 0xc8, 0x25, 0x46, 0x64, 0x92, 0x5b, 0x5d, 0xd7, 0xd0, 0xb2, 0xf5, 0xaa}};
+static const EFI_GUID microsoft_guid =
+    {{0xbd, 0x9a, 0xfa, 0x77, 0x59, 0x03, 0x32, 0x4d, 0xbd, 0x60, 0x28, 0xf4, 0xe7, 0x8f, 0x78, 0x4b}};
 
 /* Converts an array of X509 certificates into an EFI_SIGNATURE_LIST */
 static EFI_SIGNATURE_LIST *
-certs_to_sig_list(X509 **cert, int count, UINTN *data_len)
+certs_to_sig_list(X509 **cert, int count, UINTN *data_len,
+                  const EFI_GUID *vendor_guid)
 {
     int i, len;
     uint8_t *ptr;
@@ -97,7 +100,7 @@ certs_to_sig_list(X509 **cert, int count, UINTN *data_len)
 
         sig_data = (EFI_SIGNATURE_DATA *)((uint8_t *)data +
                    sizeof(EFI_SIGNATURE_LIST) + i * signature_size);
-        memcpy(&sig_data->SignatureOwner, &citrix_guid, GUID_LEN);
+        memcpy(&sig_data->SignatureOwner, vendor_guid, GUID_LEN);
     }
 
     return data;
@@ -221,7 +224,7 @@ int main(int argc, char **argv)
     X509 **cert;
     UINTN name_len, data_len, sig_len, descriptor_len;
     uint8_t *name, *data, *sig, *descriptor;
-    const EFI_GUID *guid;
+    const EFI_GUID *guid, *vendor_guid;
     char *out_file;
     EFI_TIME timestamp;
     UINT32 attr = ATTR_BRNV | EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS;
@@ -295,6 +298,11 @@ int main(int argc, char **argv)
         exit(1);
     }
 
+    if (!strcmp(argv[optind], "PK"))
+        vendor_guid = &citrix_guid;
+    else
+        vendor_guid = &microsoft_guid;
+
     /* Handle "name" argument */
     name_len = strlen(argv[optind]);
     name = malloc(name_len * 2);
@@ -345,7 +353,7 @@ int main(int argc, char **argv)
     timestamp.Daylight = 0;
     timestamp.Pad2 = 0;
 
-    data = (uint8_t *)certs_to_sig_list(cert, count, &data_len);
+    data = (uint8_t *)certs_to_sig_list(cert, count, &data_len, vendor_guid);
     sig = sign_data(sign_cert, sign_key, name, name_len, guid, attr,
                     &timestamp, data, data_len, &sig_len);
     descriptor = (uint8_t *)create_descriptor(sig_len, &timestamp, &descriptor_len);
