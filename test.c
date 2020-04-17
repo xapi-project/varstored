@@ -1697,13 +1697,9 @@ static void test_set_variable_special_vars(void)
     check_variable_data(auditMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
 
-    /* DeployedMode must always be 0 in our implementation. */
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
-                        (uint8_t *)"\0", 1);
-
     /*
-     * The contents of SecureBoot and SetupMode are verified as part of the
-     * secure variable tests.
+     * The contents of SecureBoot, DeployedMode and SetupMode are verified as
+     * part of the secure variable tests.
      * The content of SignatureSupport is not verified since I don't know how
      * to sensibly verify it and it is not worth the effort.
      */
@@ -1840,6 +1836,8 @@ static void test_secure_set_variable_setupmode(void)
 
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                        (uint8_t *)"\0", 1);
     test_set_secure_variable();
 }
 
@@ -1851,11 +1849,15 @@ static void test_secure_set_variable_usermode(void)
     /* Check we're in setup mode */
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                        (uint8_t *)"\0", 1);
 
     set_usermode();
 
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, (uint8_t *)"\1", 1);
 
     test_set_secure_variable();
 }
@@ -1872,6 +1874,8 @@ static void test_secure_set_PK(void)
 
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                        (uint8_t *)"\0", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
 
@@ -1881,6 +1885,8 @@ static void test_secure_set_PK(void)
                    &sign_certB, EFI_SECURITY_VIOLATION);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, (uint8_t *)"\0", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
 
@@ -1912,6 +1918,8 @@ static void test_secure_set_PK(void)
 
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, (uint8_t *)"\0", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
 
@@ -1921,6 +1929,8 @@ static void test_secure_set_PK(void)
                    &sign_testPK, EFI_SUCCESS);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, (uint8_t *)"\1", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
 
@@ -1930,6 +1940,8 @@ static void test_secure_set_PK(void)
                    &sign_certB, EFI_SECURITY_VIOLATION);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, (uint8_t *)"\1", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
 
@@ -1947,6 +1959,8 @@ static void test_secure_set_PK(void)
                        &sign_testPK, EFI_INVALID_PARAMETER);
         check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                             BSIZ, 0, (uint8_t *)"\0", 1);
+        check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+                            BSIZ, 0, (uint8_t *)"\1", 1);
         check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                             (uint8_t *)"\1", 1);
 
@@ -1957,6 +1971,8 @@ static void test_secure_set_PK(void)
                        &sign_testPK, EFI_INVALID_PARAMETER);
         check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                             BSIZ, 0, (uint8_t *)"\0", 1);
+        check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+                            BSIZ, 0, (uint8_t *)"\1", 1);
         check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                             (uint8_t *)"\1", 1);
 
@@ -1971,6 +1987,8 @@ static void test_secure_set_PK(void)
 
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, (uint8_t *)"\1", 1);
 
     /* Try setting two keys in one write, two lists */
     joint_cert = malloc(certPK_len + certB_len);
@@ -2004,6 +2022,8 @@ static void test_secure_set_PK(void)
                    &sign_testPK, EFI_SUCCESS);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, (uint8_t *)"\1", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
 
@@ -2012,6 +2032,8 @@ static void test_secure_set_PK(void)
                    &test_timec, NULL, 0, &sign_testPK, EFI_SECURITY_VIOLATION);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, (uint8_t *)"\1", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
 
@@ -2020,6 +2042,8 @@ static void test_secure_set_PK(void)
                    &test_timec, NULL, 0, &sign_certB, EFI_SUCCESS);
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, (uint8_t *)"\0", 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
     sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
@@ -2035,11 +2059,14 @@ static void sig_db_check(const dstring *key_db, const EFI_GUID *guid,
     EFI_STATUS status;
     size_t i;
     uint8_t *setupmode = setup ? (uint8_t *)"\1" : (uint8_t *)"\0";
+    uint8_t *deployedmode = setup ? (uint8_t *)"\0" : (uint8_t *)"\1";
     uint8_t *securemode = setup ? (uint8_t *)"\0" : (uint8_t *)"\1";
 
     /* Check SetupMode and SecureBoot vars are as expected */
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, setupmode, 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, deployedmode, 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         securemode, 1);
 
@@ -2110,6 +2137,8 @@ static void sig_db_check(const dstring *key_db, const EFI_GUID *guid,
     /* SetupMode and SecureBoot vars should not have changed */
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, setupmode, 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, deployedmode, 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         securemode, 1);
 
@@ -2125,6 +2154,8 @@ static void sig_db_check(const dstring *key_db, const EFI_GUID *guid,
     /* SetupMode and SecureBoot vars should not have changed */
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, setupmode, 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+                        BSIZ, 0, deployedmode, 1);
     check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         securemode, 1);
 
@@ -2327,6 +2358,8 @@ static void test_secure_set_db__setupmode(const dstring *key_db)
 
     check_variable_data(setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                        (uint8_t *)"\0", 1);
 
     sig_db_check(key_db, &gEfiImageSecurityDatabaseGuid, &test_time, true);
 

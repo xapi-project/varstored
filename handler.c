@@ -1147,7 +1147,13 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
 
         if (setup_mode == 1 && *payload_len_out != 0) {
             EFI_STATUS saved_status;
+            uint8_t deployed_mode = 1;
 
+            /*
+             * Always try to update all the internal variables but return an
+             * error if any fail.
+             */
+            status = EFI_SUCCESS;
             setup_mode = 0;
             saved_status = internal_set_variable(EFI_SETUP_MODE_NAME,
                                                  sizeof(EFI_SETUP_MODE_NAME),
@@ -1155,24 +1161,36 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
                                                  &setup_mode,
                                                  sizeof(setup_mode),
                                                  ATTR_BR);
+            if (saved_status != EFI_SUCCESS)
+                status = saved_status;
+
+            saved_status = internal_set_variable(EFI_DEPLOYED_MODE_NAME,
+                                                 sizeof(EFI_DEPLOYED_MODE_NAME),
+                                                 &gEfiGlobalVariableGuid,
+                                                 &deployed_mode,
+                                                 sizeof(deployed_mode),
+                                                 ATTR_BR);
+            if (saved_status != EFI_SUCCESS)
+                status = saved_status;
 
             secure_boot = secure_boot_enable;
-            status = internal_set_variable(EFI_SECURE_BOOT_MODE_NAME,
-                                           sizeof(EFI_SECURE_BOOT_MODE_NAME),
-                                           &gEfiGlobalVariableGuid,
-                                           &secure_boot,
-                                           sizeof(secure_boot),
-                                           ATTR_BR);
-
-            /*
-             * Always try to update both internal variables but return an error
-             * if either fail.
-             */
+            saved_status = internal_set_variable(EFI_SECURE_BOOT_MODE_NAME,
+                                                 sizeof(EFI_SECURE_BOOT_MODE_NAME),
+                                                 &gEfiGlobalVariableGuid,
+                                                 &secure_boot,
+                                                 sizeof(secure_boot),
+                                                 ATTR_BR);
             if (saved_status != EFI_SUCCESS)
                 status = saved_status;
         } else if (setup_mode == 0 && *payload_len_out == 0) {
             EFI_STATUS saved_status;
+            uint8_t deployed_mode = 0;
 
+            /*
+             * Always try to update all the internal variables but return an
+             * error if any fail.
+             */
+            status = EFI_SUCCESS;
             setup_mode = 1;
             saved_status = internal_set_variable(EFI_SETUP_MODE_NAME,
                                                  sizeof(EFI_SETUP_MODE_NAME),
@@ -1180,19 +1198,25 @@ static EFI_STATUS verify_auth_var(uint8_t *name, UINTN name_len,
                                                  &setup_mode,
                                                  sizeof(setup_mode),
                                                  ATTR_BR);
+            if (saved_status != EFI_SUCCESS)
+                status = saved_status;
+
+            saved_status = internal_set_variable(EFI_DEPLOYED_MODE_NAME,
+                                                 sizeof(EFI_DEPLOYED_MODE_NAME),
+                                                 &gEfiGlobalVariableGuid,
+                                                 &deployed_mode,
+                                                 sizeof(deployed_mode),
+                                                 ATTR_BR);
+            if (saved_status != EFI_SUCCESS)
+                status = saved_status;
 
             secure_boot = 0;
-            status = internal_set_variable(EFI_SECURE_BOOT_MODE_NAME,
-                                           sizeof(EFI_SECURE_BOOT_MODE_NAME),
-                                           &gEfiGlobalVariableGuid,
-                                           &secure_boot,
-                                           sizeof(secure_boot),
-                                           ATTR_BR);
-
-            /*
-             * Always try to update both internal variables but return an error
-             * if either fail.
-             */
+            saved_status = internal_set_variable(EFI_SECURE_BOOT_MODE_NAME,
+                                                 sizeof(EFI_SECURE_BOOT_MODE_NAME),
+                                                 &gEfiGlobalVariableGuid,
+                                                 &secure_boot,
+                                                 sizeof(secure_boot),
+                                                 ATTR_BR);
             if (saved_status != EFI_SUCCESS)
                 status = saved_status;
         }
@@ -1969,7 +1993,7 @@ setup_variables(void)
     UINTN data_len;
     uint8_t setup_mode = 0;
     uint8_t *data;
-    uint8_t secure_boot = 0, deployed_mode = 0, audit_mode = 0;
+    uint8_t secure_boot = 0, deployed_mode = 1, audit_mode = 0;
 
     if (!EVP_add_digest(EVP_sha256()))
         return false;
@@ -1988,6 +2012,7 @@ setup_variables(void)
                                    &gEfiGlobalVariableGuid, &data, &data_len);
     if (status == EFI_NOT_FOUND) {
         setup_mode = 1;
+        deployed_mode = 0;
     } else if (status == EFI_SUCCESS) {
         free(data);
         secure_boot = secure_boot_enable;
