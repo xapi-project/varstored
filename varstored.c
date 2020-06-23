@@ -495,7 +495,7 @@ varstored_initialize(domid_t domid)
         rc = xenevtchn_bind_interdomain(varstored_state.evth, varstored_state.domid,
                                         port);
         if (rc < 0) {
-            ERR("Failed to failed to bind port: %d, %s\n", errno, strerror(errno));
+            ERR("Failed to bind port: %d, %s\n", errno, strerror(errno));
             goto err;
         }
         varstored_state.ioreq_local_port[i] = rc;
@@ -509,7 +509,7 @@ varstored_initialize(domid_t domid)
     rc = xenevtchn_bind_interdomain(varstored_state.evth, varstored_state.domid,
                                     buf_port);
     if (rc < 0) {
-        ERR("Failed to failed to bind buffered port: %d, %s\n",
+        ERR("Failed to bind buffered port: %d, %s\n",
             errno, strerror(errno));
         goto err;
     }
