@@ -116,7 +116,7 @@ static const char *varstored_option_text[] = {
     "<name>:<val>",
 };
 
-static sig_atomic_t run_main_loop = 1;
+static sig_atomic_t run_main_loop = 0;
 
 static const char *prog;
 const struct backend *db;
@@ -337,7 +337,7 @@ varstored_sigterm(int num)
 
     varstored_teardown();
 
-    if (num == SIGTERM)
+    if (num == SIGTERM && run_main_loop)
         run_main_loop = 0;
     else
         exit(0);
@@ -830,6 +830,7 @@ main(int argc, char **argv)
     pfd.events = POLLIN | POLLERR | POLLHUP;
     pfd.revents = 0;
 
+    run_main_loop = 1;
     while (run_main_loop) {
         rc = poll(&pfd, 1, -1);
 
