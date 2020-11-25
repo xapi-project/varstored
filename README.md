@@ -30,30 +30,38 @@ available during the build. These are used for authenticated variable support
 and Secure Boot verification. If these certificates are not acquired from
 elsewhere, they can be generated as follows:
 
+```
 $ make KEK.pem
 $ echo KEK.pem > KEK.list
 $ make db.pem
 $ echo db.pem > db.list
+```
 
 Finally, build the auth files:
 
+```
 $ make auth
+```
 
 And place them where varstored can find them:
 
+```
 $ mkdir -p /usr/share/varstored
 $ cp PK.auth KEK.auth db.auth dbx.auth /usr/share/varstored
+```
 
 Build the main daemon and tools and install them:
 
+```
 $ make varstored tools
 $ mkdir -p /usr/sbin /usr/bin
 $ cp varstored /usr/sbin
 $ cp tools/varstore-{get,set,ls,rm,sb-state} /usr/bin
+```
 
 Contributing
 ------------
-Please send a pull request to https://github.com/rosslagerwall/varstored
+Please send a pull request to https://github.com/xapi-project/varstored
 
 Maintainers
 -----------
