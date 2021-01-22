@@ -1771,7 +1771,7 @@ do_set_variable(uint8_t *comm_buf)
                                      NULL,
                                      &payload, &payload_len,
                                      digest, &timestamp);
-            if (EFI_ERROR(status)) {
+            if (status != EFI_SUCCESS) {
                 serialize_result(&ptr, status);
                 goto err;
             }
