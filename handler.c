@@ -869,8 +869,10 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
     verify_len = name_len + GUID_LEN + sizeof(UINT32) + sizeof(EFI_TIME) +
                  payload_len;
     verify_buf = malloc(verify_len);
-    if (!verify_buf)
-        return EFI_DEVICE_ERROR;
+    if (!verify_buf) {
+        status = EFI_DEVICE_ERROR;
+        goto out;
+    }
 
     ptr = verify_buf;
     memcpy(ptr, name, name_len);
