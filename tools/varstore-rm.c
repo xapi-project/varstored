@@ -121,6 +121,7 @@ parse_one_clone_file(const char *path)
         if (ptr >= end || !parse_guid(&v->guid, line)) {
             fprintf(stderr, "Failed to parse line %d in '%s'.\n", lineno, path);
             fclose(f);
+            free(v);
             return false;
         } else {
             v->guid_str = strdup(line);
