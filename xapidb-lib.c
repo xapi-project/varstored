@@ -703,12 +703,10 @@ get_from_xapi(const char *uuid, char **out)
     response = NULL;
 
     status = xmlrpc_call(&response, LOGOUT_CALL, session_ref);
-    if (status != HTTP_STATUS_OK) {
+    if (status != HTTP_STATUS_OK || !xmlrpc_process(response, NULL)) {
         ERR("Failed to logout\n");
-        goto out;
-    }
-    if (!xmlrpc_process(response, NULL)) {
-        ERR("Failed to logout\n");
+        free(*out);
+        *out = NULL;
         goto out;
     }
     free(response);
