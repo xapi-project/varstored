@@ -154,8 +154,8 @@ static unsigned int send_credit = MAX_CREDIT; /* Number of allowed fast sends. *
  * Serializes the list of variables into a buffer. The buffer must be freed by
  * the caller. Returns the length of the buffer on success otherwise 0.
  */
-size_t
-xapidb_serialize_variables(uint8_t **out, bool only_nv)
+bool
+xapidb_serialize_variables(uint8_t **out, size_t *out_len, bool only_nv)
 {
     struct efi_variable *l;
     uint8_t *buf, *ptr;
@@ -181,7 +181,7 @@ xapidb_serialize_variables(uint8_t **out, bool only_nv)
     buf = malloc(data_len + DB_HEADER_LEN);
     if (!buf) {
         DBG("Failed to allocate memory\n");
-        return 0;
+        return false;
     }
 
     ptr = buf;
@@ -210,7 +210,8 @@ xapidb_serialize_variables(uint8_t **out, bool only_nv)
     }
 
     *out = buf;
-    return data_len + DB_HEADER_LEN;
+    *out_len = data_len + DB_HEADER_LEN;
+    return true;
 }
 
 static bool
@@ -480,8 +481,7 @@ xapidb_set_variable(void)
     if (!xapidb_arg_uuid)
         return true;
 
-    len = xapidb_serialize_variables(&buf, true);
-    if (len == 0)
+    if (!xapidb_serialize_variables(&buf, &len, true))
         return false;
 
     if (!base64_encode(buf, len, &encoded)) {
