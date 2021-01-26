@@ -129,6 +129,9 @@ parse_one_clone_file(const char *path)
             if (!v->guid_str || !v->name) {
                 ERR("Out of memory\n");
                 fclose(f);
+                free(v->guid_str);
+                free(v->name);
+                free(v);
                 return false;
             }
             v->next = clone_vars;
