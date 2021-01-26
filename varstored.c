@@ -748,6 +748,7 @@ main(int argc, char **argv)
             break;
 
         case VARSTORED_OPT_CHROOT:
+            free(opt_chroot);
             opt_chroot = strdup(optarg);
             break;
 
