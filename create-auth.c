@@ -30,6 +30,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include <openssl/objects.h>
 #include <openssl/pem.h>
@@ -143,7 +144,7 @@ sign_data(X509 *cert, EVP_PKEY *key, const uint8_t *name, UINTN name_len,
     memcpy(ptr, data, data_len);
 
     bio = BIO_new_mem_buf(buf, len);
-    if (!buf) {
+    if (!bio) {
         printf("Failed to create bio\n");
         exit(1);
     }
@@ -321,9 +322,14 @@ int main(int argc, char **argv)
     out_file = argv[optind];
     optind++;
 
-    /* Hanlde certificate arguments */
+    /* Handle certificate arguments */
     count = argc - optind;
     cert = calloc(count, sizeof(*cert));
+    if (!cert) {
+        printf("Out of memory!\n");
+        exit(1);
+    }
+
     for (i = optind; i < argc; i++) {
         bio = BIO_new_file(argv[i], "r");
         if (!bio) {
@@ -341,6 +347,10 @@ int main(int argc, char **argv)
     /* Initialize timestamp to current time (in UTC). */
     time(&t);
     tm = gmtime(&t);
+    if (!tm) {
+         printf("gmtime() failed: %d, %s\n", errno, strerror(errno));
+         exit(1);
+    }
     timestamp.Year = tm->tm_year + 1900;
     timestamp.Month = tm->tm_mon + 1;
     timestamp.Day = tm->tm_mday;
