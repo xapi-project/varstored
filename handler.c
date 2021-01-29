@@ -1518,7 +1518,7 @@ do_set_variable(uint8_t *comm_buf)
     UINT32 attr;
     BOOLEAN at_runtime, append;
     EFI_STATUS status;
-    uint8_t digest[SHA256_DIGEST_SIZE];
+    uint8_t digest[SHA256_DIGEST_SIZE] = {0};
     EFI_TIME timestamp;
 
     ptr = comm_buf;
