@@ -326,7 +326,7 @@ X509_to_buf(X509 *cert, int *len)
 static EFI_STATUS
 X509_get_tbs_cert(X509 *cert, uint8_t **tbs_cert, UINTN *tbs_len)
 {
-    int asn1_tag, obj_class, len;
+    int asn1_tag, obj_class, len, ret;
     long tmp_len;
     uint8_t *buf, *ptr, *tbs_ptr;
 
@@ -336,17 +336,17 @@ X509_get_tbs_cert(X509 *cert, uint8_t **tbs_cert, UINTN *tbs_len)
 
     ptr = buf;
     tmp_len = 0;
-    ASN1_get_object((const unsigned char **)&ptr, &tmp_len, &asn1_tag,
-                    &obj_class, len);
-    if (asn1_tag != V_ASN1_SEQUENCE) {
+    ret = ASN1_get_object((const unsigned char **)&ptr, &tmp_len, &asn1_tag,
+                          &obj_class, len);
+    if (ret == 0x80 || asn1_tag != V_ASN1_SEQUENCE) {
         free(buf);
         return EFI_SECURITY_VIOLATION;
     }
 
     tbs_ptr = ptr;
-    ASN1_get_object((const unsigned char **)&ptr, &tmp_len, &asn1_tag,
-                    &obj_class, tmp_len);
-    if (asn1_tag != V_ASN1_SEQUENCE) {
+    ret = ASN1_get_object((const unsigned char **)&ptr, &tmp_len, &asn1_tag,
+                          &obj_class, tmp_len);
+    if (ret == 0x80 || asn1_tag != V_ASN1_SEQUENCE) {
         free(buf);
         return EFI_SECURITY_VIOLATION;
     }
