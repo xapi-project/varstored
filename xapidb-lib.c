@@ -553,7 +553,7 @@ unserialize_variables(uint8_t **buf, size_t count, size_t rem)
         unserialize_guid(buf, &l->guid);
         l->attributes = unserialize_uint32(buf);
         unserialize_timestamp(buf, &l->timestamp);
-        memcpy(l->cert, buf, sizeof(l->cert));
+        memcpy(l->cert, *buf, sizeof(l->cert));
         *buf += sizeof(l->cert);
 
         l->next = var_list;
