@@ -111,6 +111,16 @@ do_get(const char *guid_str, const char *name, bool show_attr)
         UINTN data_len;
 
         data = unserialize_data(&ptr, &data_len, DATA_LIMIT);
+        if (!data) {
+            if (data_len == 0) {
+                /* The variable is empty - nothing to write out. */
+                return true;
+            } else {
+                ERR("Data too large: %lu > %u\n", data_len, DATA_LIMIT);
+                return false;
+            }
+        }
+
         if (fwrite(data, 1, data_len, stdout) != data_len) {
             ERR("Failed to write out data\n");
             free(data);
