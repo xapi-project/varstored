@@ -130,13 +130,6 @@ static const uint8_t EFI_IMAGE_SECURITY_DATABASE[] = {'d',0,'b',0};
 static const uint8_t EFI_IMAGE_SECURITY_DATABASE1[] = {'d',0,'b',0,'x',0};
 static const uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
 
-/*
- * A single variable takes up a minimum number of bytes.
- * This ensures a suitably low limit on the number of variables that can be
- * stored.
- */
-#define VARIABLE_SIZE_OVERHEAD 128
-
 #define AUTH_PATH_PREFIX "/usr/share/varstored"
 
 /*

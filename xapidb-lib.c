@@ -45,6 +45,7 @@
 
 #include <debug.h>
 #include <efi.h>
+#include <handler.h>
 #include <serialize.h>
 #include <xapidb.h>
 
@@ -600,6 +601,10 @@ xapidb_parse_blob(uint8_t **buf, int len)
     }
 
     count = unserialize_uintn(buf);
+    if (count > MAX_VARIABLE_COUNT) {
+        ERR("Invalid variable count %ld > %u\n", count, MAX_VARIABLE_COUNT);
+        return false;
+    }
     unserialize_uintn(buf); /* data_len */
 
     return unserialize_variables(buf, count, len - DB_HEADER_LEN);

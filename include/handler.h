@@ -38,6 +38,14 @@
 #define DATA_LIMIT 57344 /* Maximum length of a single variable */
 #define TOTAL_LIMIT 131072 /* Maximum total storage */
 
+/*
+ * A single variable takes up a minimum number of bytes.
+ * This ensures a suitably low limit on the number of variables that can be
+ * stored.
+ */
+#define VARIABLE_SIZE_OVERHEAD 128
+#define MAX_VARIABLE_COUNT (TOTAL_LIMIT / VARIABLE_SIZE_OVERHEAD)
+
 #define PAGE_SIZE 4096
 #define SHMEM_PAGES 16
 #define SHMEM_SIZE (SHMEM_PAGES * PAGE_SIZE)
