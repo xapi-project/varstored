@@ -75,6 +75,7 @@ struct efi_variable {
 extern struct efi_variable *var_list;
 
 void dispatch_command(uint8_t *comm_buf);
+bool setup_crypto(void);
 bool setup_variables(void);
 bool setup_keys(void);
 bool load_auth_data(void);

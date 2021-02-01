@@ -1982,6 +1982,12 @@ void dispatch_command(uint8_t *comm_buf)
 }
 
 bool
+setup_crypto(void)
+{
+    return !!EVP_add_digest(EVP_sha256());
+}
+
+bool
 setup_variables(void)
 {
     EFI_STATUS status;
@@ -1989,9 +1995,6 @@ setup_variables(void)
     uint8_t setup_mode = 0;
     uint8_t *data;
     uint8_t secure_boot = 0, deployed_mode = 1, audit_mode = 0;
-
-    if (!EVP_add_digest(EVP_sha256()))
-        return false;
 
     status = internal_set_variable(EFI_SIGNATURE_SUPPORT_NAME,
                                    sizeof(EFI_SIGNATURE_SUPPORT_NAME),

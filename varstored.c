@@ -549,6 +549,11 @@ varstored_initialize(domid_t domid)
 
     /* Guest data should not be accessed before this point. */
 
+    if (!setup_crypto()) {
+        ERR("Failed to setup crypto\n");
+        goto err;
+    }
+
     if (opt_resume) {
         if (!db->resume()) {
             ERR("Failed to resume!\n");
