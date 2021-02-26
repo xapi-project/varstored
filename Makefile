@@ -29,7 +29,6 @@ LDLIBS := -lutil -lrt
 endif
 
 LDLIBS += -lxenstore \
-          -lxenctrl \
           -lxenforeignmemory \
           -lxendevicemodel \
           -lxenevtchn \

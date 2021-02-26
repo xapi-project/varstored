@@ -55,7 +55,7 @@
 
 #include <locale.h>
 
-#include <xenctrl.h>
+#include <xen/memory.h>
 #include <xen/hvm/ioreq.h>
 #include <xenstore.h>
 #include <xenevtchn.h>
@@ -159,7 +159,7 @@ typedef struct varstored_state {
     bool ioserv_created;
     xenforeignmemory_resource_handle *iores;
     shared_iopage_t *iopage;
-    xc_evtchn_port_or_error_t *ioreq_local_port;
+    xenevtchn_port_or_error_t *ioreq_local_port;
 } varstored_state_t;
 
 static varstored_state_t varstored_state;
@@ -340,37 +340,11 @@ static bool
 varstored_initialize(domid_t domid)
 {
     int rc, i;
-    xc_dominfo_t dominfo;
     evtchn_port_t port;
     struct xs_handle *xsh = NULL;
-    xc_interface *xch = NULL;
     void *addr = NULL;
 
     varstored_state.domid = domid;
-
-    xch = xc_interface_open(NULL, NULL, 0);
-    if (!xch) {
-        ERR("Failed to open xc_interface handle: %d, %s\n",
-            errno, strerror(errno));
-        goto err;
-    }
-
-    rc = xc_domain_getinfo(xch, domid, 1, &dominfo);
-    if (rc < 0) {
-        ERR("Failed to get domain info: %d, %s\n", errno, strerror(errno));
-        goto err;
-    }
-    if (dominfo.domid != domid) {
-        ERR("Domid %u does not match expected %u\n", dominfo.domid, domid);
-        goto err;
-    }
-
-    varstored_state.vcpus = dominfo.max_vcpu_id + 1;
-
-    INFO("%d vCPU(s)\n", varstored_state.vcpus);
-
-    xc_interface_close(xch);
-    xch = NULL;
 
     varstored_state.dmod = xendevicemodel_open(NULL, 0);
     if (!varstored_state.dmod) {
@@ -398,6 +372,15 @@ varstored_initialize(domid_t domid)
         ERR("Failed to restrict Xen handles: %d, %s\n", errno, strerror(errno));
         goto err;
     }
+
+    rc = xendevicemodel_nr_vcpus(varstored_state.dmod, varstored_state.domid,
+                                 &varstored_state.vcpus);
+    if (rc < 0) {
+        ERR("Failed to query nr_vcpus: %d, %s\n", errno, strerror(errno));
+        goto err;
+    }
+
+    INFO("%d vCPU(s)\n", varstored_state.vcpus);
 
     rc = xendevicemodel_create_ioreq_server(varstored_state.dmod,
                                             varstored_state.domid, 0,
@@ -436,7 +419,7 @@ varstored_initialize(domid_t domid)
         goto err;
     }
 
-    varstored_state.ioreq_local_port = malloc(sizeof (xc_evtchn_port_or_error_t) *
+    varstored_state.ioreq_local_port = malloc(sizeof (xenevtchn_port_or_error_t) *
                                          varstored_state.vcpus);
     if (!varstored_state.ioreq_local_port) {
         ERR("Failed to alloc port array: %d, %s\n", errno, strerror(errno));
@@ -528,7 +511,6 @@ varstored_initialize(domid_t domid)
     return true;
 
 err:
-    xc_interface_close(xch);
     xs_close(xsh);
     free_auth_data();
     return false;
@@ -560,7 +542,7 @@ varstored_poll_iopage(unsigned int i)
 static void
 varstored_poll_iopages(void)
 {
-    xc_evtchn_port_or_error_t port;
+    xenevtchn_port_or_error_t port;
     int i;
 
     port = xenevtchn_pending(varstored_state.evth);
