@@ -160,9 +160,6 @@ typedef struct varstored_state {
     xenforeignmemory_resource_handle *iores;
     shared_iopage_t *iopage;
     xc_evtchn_port_or_error_t *ioreq_local_port;
-    buffered_iopage_t *buffered_iopage;
-    xc_evtchn_port_or_error_t buf_ioreq_port;
-    xc_evtchn_port_or_error_t buf_ioreq_local_port;
 } varstored_state_t;
 
 static varstored_state_t varstored_state;
@@ -297,10 +294,6 @@ varstored_teardown(void)
 
     io_port_deregister();
 
-    if (varstored_state.buf_ioreq_local_port >= 0)
-        xenevtchn_unbind(varstored_state.evth,
-                         varstored_state.buf_ioreq_local_port);
-
     if (varstored_state.ioreq_local_port) {
         for (i = 0; i < varstored_state.vcpus; i++) {
             if (varstored_state.ioreq_local_port[i] >= 0)
@@ -350,12 +343,10 @@ varstored_initialize(domid_t domid)
     uint64_t number = 0;
     xc_dominfo_t dominfo;
     evtchn_port_t port;
-    evtchn_port_t buf_port;
     struct xs_handle *xsh = NULL;
     xc_interface *xch = NULL;
     void *addr = NULL;
 
-    varstored_state.buf_ioreq_local_port = -1;
     varstored_state.domid = domid;
 
     xch = xc_interface_open(NULL, NULL, 0);
@@ -433,7 +424,7 @@ varstored_initialize(domid_t domid)
     }
 
     rc = xendevicemodel_create_ioreq_server(varstored_state.dmod,
-                                            varstored_state.domid, 1,
+                                            varstored_state.domid, 0,
                                             &varstored_state.ioservid);
     if (rc < 0) {
         ERR("Failed to create ioreq server: %d, %s\n", errno, strerror(errno));
@@ -446,7 +437,8 @@ varstored_initialize(domid_t domid)
             varstored_state.fmem,
             varstored_state.domid,
             XENMEM_resource_ioreq_server,
-            varstored_state.ioservid, 0, 2,
+            varstored_state.ioservid,
+            XENMEM_resource_ioreq_server_frame_ioreq(0), 1,
             &addr,
             PROT_READ | PROT_WRITE, 0);
     if (!varstored_state.iores) {
@@ -455,20 +447,9 @@ varstored_initialize(domid_t domid)
         goto err;
     }
 
-    varstored_state.buffered_iopage = addr;
-    varstored_state.iopage = addr + PAGE_SIZE;
+    varstored_state.iopage = addr;
 
     INFO("iopage = %p\n", varstored_state.iopage);
-    INFO("buffered_iopage = %p\n", varstored_state.buffered_iopage);
-
-    rc = xendevicemodel_get_ioreq_server_info(varstored_state.dmod,
-                                              varstored_state.domid,
-                                              varstored_state.ioservid,
-                                              NULL, NULL, &buf_port);
-    if (rc < 0) {
-        ERR("Failed to get ioreq server info: %d, %s\n", errno, strerror(errno));
-        goto err;
-    }
 
     rc = xendevicemodel_set_ioreq_server_state(varstored_state.dmod,
                                                varstored_state.domid,
@@ -505,19 +486,6 @@ varstored_initialize(domid_t domid)
         INFO("VCPU%d: %u -> %u\n", i,
             varstored_state.iopage->vcpu_ioreq[i].vp_eport,
             varstored_state.ioreq_local_port[i]);
-
-    rc = xenevtchn_bind_interdomain(varstored_state.evth, varstored_state.domid,
-                                    buf_port);
-    if (rc < 0) {
-        ERR("Failed to bind buffered port: %d, %s\n",
-            errno, strerror(errno));
-        goto err;
-    }
-    varstored_state.buf_ioreq_local_port = rc;
-
-    INFO("%u -> %u\n",
-        varstored_state.buf_ioreq_port,
-        varstored_state.buf_ioreq_local_port);
 
     rc = io_port_initialize(varstored_state.dmod, varstored_state.fmem,
                             varstored_state.domid, varstored_state.ioservid);
@@ -591,58 +559,6 @@ err:
 }
 
 static void
-varstored_poll_buffered_iopage(void)
-{
-    for (;;) {
-        unsigned int    read_pointer;
-        unsigned int    write_pointer;
-
-        read_pointer = varstored_state.buffered_iopage->read_pointer;
-        write_pointer = varstored_state.buffered_iopage->write_pointer;
-
-        if (read_pointer == write_pointer)
-            break;
-
-        while (read_pointer != write_pointer) {
-            unsigned int    slot;
-            buf_ioreq_t     *buf_ioreq;
-            ioreq_t         ioreq;
-
-            slot = read_pointer % IOREQ_BUFFER_SLOT_NUM;
-
-            buf_ioreq = &varstored_state.buffered_iopage->buf_ioreq[slot];
-
-            ioreq.size = 1UL << buf_ioreq->size;
-            ioreq.count = 1;
-            ioreq.addr = buf_ioreq->addr;
-            ioreq.data = buf_ioreq->data;
-            ioreq.state = STATE_IOREQ_READY;
-            ioreq.dir = buf_ioreq->dir;
-            ioreq.df = 1;
-            ioreq.type = buf_ioreq->type;
-            ioreq.data_is_ptr = 0;
-
-            read_pointer++;
-
-            if (ioreq.size == 8) {
-                slot = read_pointer % IOREQ_BUFFER_SLOT_NUM;
-                buf_ioreq = &varstored_state.buffered_iopage->buf_ioreq[slot];
-
-                ioreq.data |= ((uint64_t)buf_ioreq->data) << 32;
-
-                read_pointer++;
-            }
-
-            handle_ioreq(&ioreq);
-            mb();
-        }
-
-        varstored_state.buffered_iopage->read_pointer = read_pointer;
-        mb();
-    }
-}
-
-static void
 varstored_poll_iopage(unsigned int i)
 {
     ioreq_t         *ioreq;
@@ -675,15 +591,10 @@ varstored_poll_iopages(void)
     if (port < 0)
         return;
 
-    if (port == varstored_state.buf_ioreq_local_port) {
-        xenevtchn_unmask(varstored_state.evth, port);
-        varstored_poll_buffered_iopage();
-    } else {
-        for (i = 0; i < varstored_state.vcpus; i++) {
-            if (port == varstored_state.ioreq_local_port[i]) {
-                xenevtchn_unmask(varstored_state.evth, port);
-                varstored_poll_iopage(i);
-            }
+    for (i = 0; i < varstored_state.vcpus; i++) {
+        if (port == varstored_state.ioreq_local_port[i]) {
+            xenevtchn_unmask(varstored_state.evth, port);
+            varstored_poll_iopage(i);
         }
     }
 }
