@@ -339,8 +339,7 @@ varstored_sigterm(int num)
 static bool
 varstored_initialize(domid_t domid)
 {
-    int rc, i, subcount = 0, first = 1;
-    uint64_t number = 0;
+    int rc, i;
     xc_dominfo_t dominfo;
     evtchn_port_t port;
     struct xs_handle *xsh = NULL;
@@ -369,29 +368,6 @@ varstored_initialize(domid_t domid)
     varstored_state.vcpus = dominfo.max_vcpu_id + 1;
 
     INFO("%d vCPU(s)\n", varstored_state.vcpus);
-
-    do {
-        rc = xc_hvm_param_get(xch, varstored_state.domid,
-                              HVM_PARAM_NR_IOREQ_SERVER_PAGES, &number);
-
-        if (rc < 0) {
-            ERR("xc_hvm_param_get failed: %d, %s", errno, strerror(errno));
-            goto err;
-        }
-
-        if (first || number > 0)
-            INFO("HVM_PARAM_NR_IOREQ_SERVER_PAGES = %ld\n", number);
-        first = 0;
-
-        if (number == 0) {
-            if (!subcount)
-                INFO("Waiting for ioreq server");
-            usleep(100000);
-            subcount++;
-            if (subcount > 10)
-                subcount = 0;
-        }
-    } while (number == 0);
 
     xc_interface_close(xch);
     xch = NULL;
