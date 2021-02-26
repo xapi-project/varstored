@@ -440,6 +440,7 @@ varstored_initialize(domid_t domid)
         goto err;
     }
     varstored_state.ioserv_created = true;
+    INFO("ioservid = %u\n", varstored_state.ioservid);
 
     varstored_state.iores = xenforeignmemory_map_resource(
             varstored_state.fmem,
@@ -468,7 +469,6 @@ varstored_initialize(domid_t domid)
         ERR("Failed to get ioreq server info: %d, %s\n", errno, strerror(errno));
         goto err;
     }
-    INFO("ioservid = %u\n", varstored_state.ioservid);
 
     rc = xendevicemodel_set_ioreq_server_state(varstored_state.dmod,
                                                varstored_state.domid,
