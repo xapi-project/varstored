@@ -2096,7 +2096,12 @@ setup_keys(void)
         if (!auth_info[i].data) {
             WARN("Cannot setup %s because auth data is missing!\n",
                  auth_info[i].pretty_name);
-            continue;
+            /*
+             * Skip setting the rest of the keys (in particular, PK).
+             * Otherwise the platform may be in user mode without
+             * KEK/db set which will cause in-guest dbx updates to fail.
+             */
+            return true;
         }
 
         INFO("Setting %s...\n", auth_info[i].pretty_name);
