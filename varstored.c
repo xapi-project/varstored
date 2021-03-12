@@ -296,7 +296,7 @@ varstored_teardown(void)
 
     if (varstored_state.ioreq_local_port) {
         for (i = 0; i < varstored_state.vcpus; i++) {
-            if (varstored_state.ioreq_local_port[i] >= 0)
+            if (varstored_state.ioreq_local_port[i])
                 xenevtchn_unbind(varstored_state.evth,
                                  varstored_state.ioreq_local_port[i]);
         }
@@ -340,7 +340,6 @@ static bool
 varstored_initialize(domid_t domid)
 {
     int rc, i;
-    evtchn_port_t port;
     struct xs_handle *xsh = NULL;
     void *addr = NULL;
 
@@ -419,21 +418,16 @@ varstored_initialize(domid_t domid)
         goto err;
     }
 
-    varstored_state.ioreq_local_port = malloc(sizeof (xenevtchn_port_or_error_t) *
-                                         varstored_state.vcpus);
+    varstored_state.ioreq_local_port = calloc(sizeof(xenevtchn_port_or_error_t),
+                                              varstored_state.vcpus);
     if (!varstored_state.ioreq_local_port) {
         ERR("Failed to alloc port array: %d, %s\n", errno, strerror(errno));
         goto err;
     }
 
-    for (i = 0; i < varstored_state.vcpus; i++)
-        varstored_state.ioreq_local_port[i] = -1;
-
     for (i = 0; i < varstored_state.vcpus; i++) {
-        port = varstored_state.iopage->vcpu_ioreq[i].vp_eport;
-
         rc = xenevtchn_bind_interdomain(varstored_state.evth, varstored_state.domid,
-                                        port);
+                                        varstored_state.iopage->vcpu_ioreq[i].vp_eport);
         if (rc < 0) {
             ERR("Failed to bind port: %d, %s\n", errno, strerror(errno));
             goto err;
