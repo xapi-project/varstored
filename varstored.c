@@ -71,7 +71,11 @@
 #include "io_port.h"
 #include "option.h"
 
-#define mb() asm volatile ("" : : : "memory")
+#if defined(__i386__)
+# define smp_mb()  asm volatile ( "lock addl $0, -4(%%esp)" ::: "memory" )
+#elif defined(__x86_64__)
+# define smp_mb()  asm volatile ( "lock addl $0, -32(%%rsp)" ::: "memory" )
+#endif
 
 #define XS_VARSTORED_PID_PATH "/local/domain/%u/varstored-pid"
 
@@ -520,15 +524,15 @@ varstored_poll_iopage(unsigned int i)
         fprintf(stderr, "IO request not ready\n");
         return;
     }
-    mb();
+    smp_mb();
 
     ioreq->state = STATE_IOREQ_INPROCESS;
 
     handle_ioreq(ioreq);
-    mb();
+    smp_mb();
 
     ioreq->state = STATE_IORESP_READY;
-    mb();
+    smp_mb();
 
     xenevtchn_notify(varstored_state.evth, varstored_state.ioreq_local_port[i]);
 }
