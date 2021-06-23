@@ -92,7 +92,8 @@ int main(int argc, char **argv)
     if (opt_socket)
         db->parse_arg("socket", opt_socket);
 
-    load_auth_data();
+    if (!strcmp(argv[optind + 1], "user"))
+        load_auth_data();
 
     if (!drop_privileges(opt_chroot, opt_depriv, opt_gid, opt_uid))
         exit(1);
