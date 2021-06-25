@@ -8,6 +8,8 @@ OBJS :=	guid.o \
 	xapidb.o \
 	xapidb-lib.o
 
+CC = gcc
+
 CFLAGS  = -I$(shell pwd)/include
 
 # _GNU_SOURCE for asprintf.
@@ -27,7 +29,6 @@ LDLIBS := -lutil -lrt
 endif
 
 LDLIBS += -lxenstore \
-          -lxenctrl \
           -lxenforeignmemory \
           -lxendevicemodel \
           -lxenevtchn \
@@ -36,7 +37,7 @@ LDLIBS += -lxenstore \
           -lseccomp \
           $$(pkg-config --libs libxml-2.0)
 
-# Get gcc to generate the dependencies for us.
+# Get the compiler to generate the dependencies for us.
 CFLAGS   += -Wp,-MD,$(@D)/.$(@F).d -MT $(@D)/$(@F)
 
 SUBDIRS  = $(filter-out ./,$(dir $(OBJS) $(LIBS)))
@@ -49,10 +50,10 @@ all: $(TARGET) tools
 .PHONY: all
 
 $(TARGET): $(LIBS) $(OBJS)
-	gcc -o $@ $(LDFLAGS) $(OBJS) $(LIBS) $(LDLIBS)
+	$(CC) -o $@ $(LDFLAGS) $(OBJS) $(LIBS) $(LDLIBS)
 
 %.o: %.c
-	gcc -o $@ $(CFLAGS) -c $<
+	$(CC) -o $@ $(CFLAGS) -c $<
 
 TOOLLIBS := -lcrypto -lseccomp $$(pkg-config --libs libxml-2.0)
 TOOLOBJS := tools/xapidb-cmdline.o \
@@ -72,13 +73,13 @@ tools: $(TOOLS)
 .PHONY: tools
 
 $(TOOLS): %: $(TOOLOBJS) %.o
-	gcc -o $@ $(LDFLAGS) $^ $(TOOLLIBS)
+	$(CC) -o $@ $(LDFLAGS) $^ $(TOOLLIBS)
 
 test.o: test.c
-	gcc -o $@ $(CFLAGS) $$(pkg-config --cflags glib-2.0) -c $<
+	$(CC) -o $@ $(CFLAGS) $$(pkg-config --cflags glib-2.0) -c $<
 
 test: test.o guid.o
-	gcc -o $@ $(LDFLAGS) $^ -lcrypto $$(pkg-config --libs glib-2.0)
+	$(CC) -o $@ $(LDFLAGS) $^ -lcrypto $$(pkg-config --libs glib-2.0)
 
 TESTKEYS := testPK.pem testPK.key testcertA.pem testcertB.pem testcertB.key
 
@@ -98,7 +99,7 @@ auth: $(AUTHS)
 .PHONY: auth
 
 create-auth: create-auth.c guid.o
-	gcc -Wall -o create-auth create-auth.c guid.o -Iinclude -lcrypto
+	$(CC) -Wall -o create-auth create-auth.c guid.o -Iinclude -lcrypto
 
 %.pem %.key:
 	openssl req -new -x509 -newkey rsa:2048 -subj "/CN=$*/" -keyout $*.key -out $*.pem -days 36500 -nodes -sha256

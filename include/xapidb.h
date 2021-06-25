@@ -46,7 +46,7 @@
 extern char *xapidb_arg_uuid;
 extern char *xapidb_arg_socket;
 
-size_t xapidb_serialize_variables(uint8_t **out, bool only_nv);
+bool xapidb_serialize_variables(uint8_t **out, size_t *out_len, bool only_nv);
 bool xapidb_set_variable(void);
 bool xapidb_parse_blob(uint8_t **buf, int len);
 enum backend_init_status xapidb_init(void);

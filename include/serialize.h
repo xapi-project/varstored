@@ -51,8 +51,10 @@ serialize_data(uint8_t **ptr, const uint8_t *data, UINTN data_len)
 {
     memcpy(*ptr, &data_len, sizeof(data_len));
     *ptr += sizeof data_len;
-    memcpy(*ptr, data, data_len);
-    *ptr += data_len;
+    if (data_len) {
+        memcpy(*ptr, data, data_len);
+        *ptr += data_len;
+    }
 }
 
 static inline void

@@ -90,8 +90,7 @@ xapidb_save(void)
     if (!arg_save)
         return true;
 
-    len = xapidb_serialize_variables(&buf, false);
-    if (len == 0)
+    if (!xapidb_serialize_variables(&buf, &len, false))
         return false;
 
     f = fopen(arg_save, "w");

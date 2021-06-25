@@ -130,13 +130,6 @@ static const uint8_t EFI_IMAGE_SECURITY_DATABASE[] = {'d',0,'b',0};
 static const uint8_t EFI_IMAGE_SECURITY_DATABASE1[] = {'d',0,'b',0,'x',0};
 static const uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
 
-/*
- * A single variable takes up a minimum number of bytes.
- * This ensures a suitably low limit on the number of variables that can be
- * stored.
- */
-#define VARIABLE_SIZE_OVERHEAD 128
-
 #define AUTH_PATH_PREFIX "/usr/share/varstored"
 
 /*
@@ -333,7 +326,7 @@ X509_to_buf(X509 *cert, int *len)
 static EFI_STATUS
 X509_get_tbs_cert(X509 *cert, uint8_t **tbs_cert, UINTN *tbs_len)
 {
-    int asn1_tag, obj_class, len;
+    int asn1_tag, obj_class, len, ret;
     long tmp_len;
     uint8_t *buf, *ptr, *tbs_ptr;
 
@@ -343,17 +336,17 @@ X509_get_tbs_cert(X509 *cert, uint8_t **tbs_cert, UINTN *tbs_len)
 
     ptr = buf;
     tmp_len = 0;
-    ASN1_get_object((const unsigned char **)&ptr, &tmp_len, &asn1_tag,
-                    &obj_class, len);
-    if (asn1_tag != V_ASN1_SEQUENCE) {
+    ret = ASN1_get_object((const unsigned char **)&ptr, &tmp_len, &asn1_tag,
+                          &obj_class, len);
+    if (ret == 0x80 || asn1_tag != V_ASN1_SEQUENCE) {
         free(buf);
         return EFI_SECURITY_VIOLATION;
     }
 
     tbs_ptr = ptr;
-    ASN1_get_object((const unsigned char **)&ptr, &tmp_len, &asn1_tag,
-                    &obj_class, tmp_len);
-    if (asn1_tag != V_ASN1_SEQUENCE) {
+    ret = ASN1_get_object((const unsigned char **)&ptr, &tmp_len, &asn1_tag,
+                          &obj_class, tmp_len);
+    if (ret == 0x80 || asn1_tag != V_ASN1_SEQUENCE) {
         free(buf);
         return EFI_SECURITY_VIOLATION;
     }
@@ -869,8 +862,10 @@ verify_auth_var_type(uint8_t *name, UINTN name_len,
     verify_len = name_len + GUID_LEN + sizeof(UINT32) + sizeof(EFI_TIME) +
                  payload_len;
     verify_buf = malloc(verify_len);
-    if (!verify_buf)
-        return EFI_DEVICE_ERROR;
+    if (!verify_buf) {
+        status = EFI_DEVICE_ERROR;
+        goto out;
+    }
 
     ptr = verify_buf;
     memcpy(ptr, name, name_len);
@@ -1523,7 +1518,7 @@ do_set_variable(uint8_t *comm_buf)
     UINT32 attr;
     BOOLEAN at_runtime, append;
     EFI_STATUS status;
-    uint8_t digest[SHA256_DIGEST_SIZE];
+    uint8_t digest[SHA256_DIGEST_SIZE] = {0};
     EFI_TIME timestamp;
 
     ptr = comm_buf;
@@ -1769,7 +1764,7 @@ do_set_variable(uint8_t *comm_buf)
                                      NULL,
                                      &payload, &payload_len,
                                      digest, &timestamp);
-            if (EFI_ERROR(status)) {
+            if (status != EFI_SUCCESS) {
                 serialize_result(&ptr, status);
                 goto err;
             }
@@ -1987,6 +1982,12 @@ void dispatch_command(uint8_t *comm_buf)
 }
 
 bool
+setup_crypto(void)
+{
+    return !!EVP_add_digest(EVP_sha256());
+}
+
+bool
 setup_variables(void)
 {
     EFI_STATUS status;
@@ -1994,9 +1995,6 @@ setup_variables(void)
     uint8_t setup_mode = 0;
     uint8_t *data;
     uint8_t secure_boot = 0, deployed_mode = 1, audit_mode = 0;
-
-    if (!EVP_add_digest(EVP_sha256()))
-        return false;
 
     status = internal_set_variable(EFI_SIGNATURE_SUPPORT_NAME,
                                    sizeof(EFI_SIGNATURE_SUPPORT_NAME),
@@ -2098,7 +2096,12 @@ setup_keys(void)
         if (!auth_info[i].data) {
             WARN("Cannot setup %s because auth data is missing!\n",
                  auth_info[i].pretty_name);
-            continue;
+            /*
+             * Skip setting the rest of the keys (in particular, PK).
+             * Otherwise the platform may be in user mode without
+             * KEK/db set which will cause in-guest dbx updates to fail.
+             */
+            return true;
         }
 
         INFO("Setting %s...\n", auth_info[i].pretty_name);

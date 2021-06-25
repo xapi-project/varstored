@@ -38,6 +38,15 @@ enum log_level {
 
 extern const enum log_level log_level;
 
+#ifdef __COVERITY__
+
+#define ERR(...) fprintf(stderr, __VA_ARGS__)
+#define WARN(...) fprintf(stderr, __VA_ARGS__)
+#define INFO(...) printf(__VA_ARGS__)
+#define DBG(...) printf(__VA_ARGS__)
+
+#else
+
 #define ERR(...)                                \
     do {                                        \
         if (log_level >= LOG_LVL_ERROR) {       \
@@ -73,6 +82,8 @@ extern const enum log_level log_level;
             fflush(stdout);                     \
         }                                       \
     } while (0)
+
+#endif
 
 #endif  /* _DEBUG_H */
 
