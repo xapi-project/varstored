@@ -754,7 +754,7 @@ xapidb_init(void)
         ERR("Failed to create BIO\n");
         free(encoded);
         free(buf);
-        return 1;
+        return BACKEND_INIT_FAILURE;
     }
     b64 = BIO_new(BIO_f_base64());
     if (!b64) {
@@ -762,7 +762,7 @@ xapidb_init(void)
         free(encoded);
         free(buf);
         BIO_free_all(bio);
-        return 1;
+        return BACKEND_INIT_FAILURE;
     }
     BIO_push(b64, bio);
     BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
