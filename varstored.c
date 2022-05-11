@@ -697,7 +697,6 @@ main(int argc, char **argv)
     int             index;
     char            *end;
     domid_t         domid;
-    sigset_t        block;
     struct pollfd   pfd;
     int             rc;
 
@@ -808,24 +807,15 @@ main(int argc, char **argv)
         exit(1);
     }
 
-    sigfillset(&block);
-
     memset(&sigterm_handler, 0, sizeof (struct sigaction));
     sigterm_handler.sa_handler = varstored_sigterm;
 
     sigaction(SIGTERM, &sigterm_handler, NULL);
-    sigdelset(&block, SIGTERM);
-
     sigaction(SIGINT, &sigterm_handler, NULL);
-    sigdelset(&block, SIGINT);
-
     sigaction(SIGHUP, &sigterm_handler, NULL);
-    sigdelset(&block, SIGHUP);
 
-    sigaction(SIGABRT, &sigterm_handler, NULL);
-    sigdelset(&block, SIGABRT);
-
-    sigprocmask(SIG_BLOCK, &block, NULL);
+    sigterm_handler.sa_handler = SIG_IGN;
+    sigaction(SIGPIPE, &sigterm_handler, NULL);
 
     if (!varstored_initialize(domid)) {
         varstored_teardown();
