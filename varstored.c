@@ -333,14 +333,10 @@ varstored_teardown(void)
 static void
 varstored_sigterm(int num)
 {
-    INFO("%s\n", strsignal(num));
-
-    varstored_teardown();
-
-    if (num == SIGTERM && run_main_loop)
+    if (run_main_loop)
         run_main_loop = 0;
     else
-        exit(0);
+        _exit(0);
 }
 
 static bool
@@ -839,6 +835,8 @@ main(int argc, char **argv)
         if (rc < 0 && errno != EINTR)
             break;
     }
+
+    varstored_teardown();
 
     if (!db->save())
         return 1;
