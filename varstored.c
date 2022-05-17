@@ -331,7 +331,7 @@ varstored_teardown(void)
 }
 
 static void
-varstored_sigterm(int num)
+varstored_signal(int num)
 {
     if (run_main_loop)
         run_main_loop = 0;
@@ -687,7 +687,7 @@ varstored_poll_iopages(void)
 int
 main(int argc, char **argv)
 {
-    struct sigaction sigterm_handler;
+    struct sigaction sig_handler;
     char            *domain_str;
     char            *ptr;
     int             index;
@@ -803,15 +803,15 @@ main(int argc, char **argv)
         exit(1);
     }
 
-    memset(&sigterm_handler, 0, sizeof (struct sigaction));
-    sigterm_handler.sa_handler = varstored_sigterm;
+    memset(&sig_handler, 0, sizeof (struct sigaction));
+    sig_handler.sa_handler = varstored_signal;
 
-    sigaction(SIGTERM, &sigterm_handler, NULL);
-    sigaction(SIGINT, &sigterm_handler, NULL);
-    sigaction(SIGHUP, &sigterm_handler, NULL);
+    sigaction(SIGTERM, &sig_handler, NULL);
+    sigaction(SIGINT, &sig_handler, NULL);
+    sigaction(SIGHUP, &sig_handler, NULL);
 
-    sigterm_handler.sa_handler = SIG_IGN;
-    sigaction(SIGPIPE, &sigterm_handler, NULL);
+    sig_handler.sa_handler = SIG_IGN;
+    sigaction(SIGPIPE, &sig_handler, NULL);
 
     if (!varstored_initialize(domid)) {
         varstored_teardown();
