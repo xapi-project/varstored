@@ -4,6 +4,7 @@ OBJS :=	guid.o \
 	depriv.o \
 	handler.o \
 	io_port.o \
+	mor.o \
 	varstored.o \
 	xapidb.o \
 	xapidb-lib.o
@@ -61,6 +62,7 @@ TOOLOBJS := tools/xapidb-cmdline.o \
             depriv.o \
             guid.o \
             handler.o \
+            mor.o \
             xapidb-lib.o
 TOOLS := tools/varstore-ls \
          tools/varstore-get \

@@ -28,6 +28,7 @@
 
 /* Including this directly allows us to poke into the implementation. */
 #include "handler.c"
+#include "mor.c"
 
 #include <glib.h>
 #include <openssl/pem.h>
@@ -87,6 +88,8 @@ static dstring *KEK_name;
 static dstring *db_name;
 static dstring *dbx_name;
 static dstring *dbt_name;
+static dstring *morControl_name;
+static dstring *morControlLock_name;
 
 static const EFI_GUID testOwnerGuid =
     {{7, 5, 3, 8, 9, 6, 1, 3, 2, 3, 4, 5, 4, 6, 7, 8}};
@@ -294,6 +297,9 @@ static void setup_globals(void)
     dbx_name = alloc_dstring("dbx");
     dbt_name = alloc_dstring("dbt");
 
+    morControl_name = alloc_dstring("MemoryOverwriteRequestControl");
+    morControlLock_name = alloc_dstring("MemoryOverwriteRequestControlLock");
+
     secure_boot_enable = true;
 
     read_x509_into_CertList("testcertA.pem", &certA, &certA_len);
@@ -319,6 +325,8 @@ static void free_globals(void)
     free_dstring(db_name);
     free_dstring(dbx_name);
     free_dstring(dbt_name);
+    free_dstring(morControl_name);
+    free_dstring(morControlLock_name);
 
     free(certA);
     free(certB);
@@ -1707,6 +1715,171 @@ static void test_set_variable_special_vars(void)
      */
 }
 
+static void test_set_variable_mor(void)
+{
+    uint8_t data[] = {0, 0};
+    uint8_t expected = 0;
+
+    reset_vars();
+    setup_variables();
+    setup_mor_variables();
+
+    /* Check initial value of morControl is 0 */
+    check_variable_data(morControl_name, &morControlGuid, BSIZ, 0,
+                        &expected, 1);
+
+    /* Storing more than 1 byte in morControl fails */
+    sv_check(morControl_name, &morControlGuid,
+             data, 2, ATTR_BRNV, EFI_INVALID_PARAMETER);
+
+    /* Deleting morControl fails */
+    sv_check(morControl_name, &morControlGuid,
+             data, 0, ATTR_BRNV, EFI_INVALID_PARAMETER);
+    sv_check(morControl_name, &morControlGuid,
+             data, 1, 0, EFI_INVALID_PARAMETER);
+
+    /* Storing with invalid attributes in morControl fails */
+    sv_check(morControl_name, &morControlGuid,
+             data, 1, ATTR_B, EFI_INVALID_PARAMETER);
+    sv_check(morControl_name, &morControlGuid,
+             data, 1, ATTR_BRNV | EFI_VARIABLE_APPEND_WRITE, EFI_INVALID_PARAMETER);
+
+    /* Setting reserved bits in morControl fails */
+    data[0] = 0x2e;
+    sv_check(morControl_name, &morControlGuid,
+             data, 1, ATTR_BRNV, EFI_INVALID_PARAMETER);
+
+    /* Setting allowed bits in morControl works */
+    data[0] = 0x11;
+    sv_ok(morControl_name, &morControlGuid,
+          data, 1, ATTR_BRNV);
+
+    /* Check morControl is now set */
+    expected = 0x11;
+    check_variable_data(morControl_name, &morControlGuid, BSIZ, 0,
+                        &expected, 1);
+
+    /* Check morControlLock is 0 (unlocked) at startup */
+    expected = 0;
+    check_variable_data(morControlLock_name, &morControlLockGuid, BSIZ, 0,
+                        &expected, 1);
+
+    /* Storing something other than 1 or 8 bytes in morControlLock fails */
+    data[0] = 0;
+    sv_check(morControlLock_name, &morControlLockGuid,
+             data, 2, ATTR_BRNV, EFI_INVALID_PARAMETER);
+
+    /* Deleting morControlLock fails */
+    sv_check(morControlLock_name, &morControlLockGuid,
+             data, 0, ATTR_BRNV, EFI_WRITE_PROTECTED);
+    sv_check(morControlLock_name, &morControlLockGuid,
+             data, 1, 0, EFI_WRITE_PROTECTED);
+
+    /* Storing with invalid attributes in morControlLock fails */
+    sv_check(morControlLock_name, &morControlLockGuid,
+             data, 1, ATTR_B, EFI_INVALID_PARAMETER);
+    sv_check(morControlLock_name, &morControlLockGuid,
+             data, 1, ATTR_BRNV | EFI_VARIABLE_APPEND_WRITE, EFI_INVALID_PARAMETER);
+
+    /* Unlock when already unlocked is a no-op */
+    sv_ok(morControlLock_name, &morControlLockGuid,
+          data, 1, ATTR_BRNV);
+
+    /* Storing an invalid value in morControlLock fails */
+    data[0] = 2;
+    sv_check(morControlLock_name, &morControlLockGuid,
+             data, 1, ATTR_BRNV, EFI_INVALID_PARAMETER);
+
+    /* Locking without a key succeeds */
+    data[0] = 1;
+    sv_ok(morControlLock_name, &morControlLockGuid,
+          data, 1, ATTR_BRNV);
+
+    /* morControlLock is now 1 (locked) */
+    expected = 1;
+    check_variable_data(morControlLock_name, &morControlLockGuid, BSIZ, 0,
+                        &expected, 1);
+
+    /* Setting morControl when locked fails */
+    sv_check(morControl_name, &morControlGuid,
+             data, 1, ATTR_BRNV, EFI_WRITE_PROTECTED);
+
+    /* Locking when already locked fails */
+    sv_check(morControlLock_name, &morControlLockGuid,
+             data, 1, ATTR_BRNV, EFI_ACCESS_DENIED);
+
+    /* Unlocking when locked without a key fails */
+    data[0] = 0;
+    sv_check(morControlLock_name, &morControlLockGuid,
+             data, 1, ATTR_BRNV, EFI_ACCESS_DENIED);
+}
+
+static void test_set_variable_mor_key(void)
+{
+    uint8_t data[] = {1, 2, 3, 4, 5, 6, 7, 8};
+    uint8_t mor_control_data = 1;
+    uint8_t expected;
+
+    reset_vars();
+    setup_variables();
+    setup_mor_variables();
+
+    /* morControlLock is initialized to 0 (unlocked) */
+    expected = 0;
+    check_variable_data(morControlLock_name, &morControlLockGuid, BSIZ, 0,
+                        &expected, 1);
+
+    /* Setting morControl when unlocked succeeds */
+    sv_ok(morControl_name, &morControlGuid,
+          &mor_control_data, 1, ATTR_BRNV);
+
+    /* Locking with a key succeeds */
+    sv_ok(morControlLock_name, &morControlLockGuid,
+          data, 8, ATTR_BRNV);
+
+    /* morControlLock is now 2 (locked with key) */
+    expected = 2;
+    check_variable_data(morControlLock_name, &morControlLockGuid, BSIZ, 0,
+                        &expected, 1);
+
+    /* Setting morControl when locked fails */
+    sv_check(morControl_name, &morControlGuid,
+             &mor_control_data, 1, ATTR_BRNV, EFI_WRITE_PROTECTED);
+
+    /* Unlocking with the correct key works */
+    sv_ok(morControlLock_name, &morControlLockGuid,
+          data, 8, ATTR_BRNV);
+
+    /* morControlLock is now 0 (unlocked) */
+    expected = 0;
+    check_variable_data(morControlLock_name, &morControlLockGuid, BSIZ, 0,
+                        &expected, 1);
+
+    /* Setting morControl when unlocked succeeds again */
+    mor_control_data = 0;
+    sv_ok(morControl_name, &morControlGuid,
+          &mor_control_data, 1, ATTR_BRNV);
+
+    /* Relock it */
+    sv_ok(morControlLock_name, &morControlLockGuid,
+          data, 8, ATTR_BRNV);
+
+    /* Unlocking with an incorrect key fails */
+    data[0] = 0;
+    sv_check(morControlLock_name, &morControlLockGuid,
+             data, 8, ATTR_BRNV, EFI_ACCESS_DENIED);
+
+    /* morControlLock is now 1 (locked without key) */
+    expected = 1;
+    check_variable_data(morControlLock_name, &morControlLockGuid, BSIZ, 0,
+                        &expected, 1);
+
+    /* Unlocking when locked without key fails */
+    data[0] = 1;
+    sv_check(morControlLock_name, &morControlLockGuid,
+             data, 8, ATTR_BRNV, EFI_ACCESS_DENIED);
+}
+
 static void set_usermode(void)
 {
     /* Move into user mode by enrolling Platform Key. */
@@ -2513,6 +2686,10 @@ int main(int argc, char **argv)
                     test_set_variable_non_volatile);
     g_test_add_func("/test/set_variable/special_vars",
                     test_set_variable_special_vars);
+    g_test_add_func("/test/set_variable/mor",
+                    test_set_variable_mor);
+    g_test_add_func("/test/set_variable/mor_key",
+                    test_set_variable_mor_key);
 
     g_test_add_func("/test/secure_set_variable/use_bad_digest",
                     test_use_bad_digest);

@@ -66,6 +66,7 @@
 #include <debug.h>
 #include <depriv.h>
 #include <handler.h>
+#include <mor.h>
 #include <backend.h>
 
 #include "io_port.h"
@@ -490,6 +491,11 @@ varstored_initialize(domid_t domid)
 
         if (!setup_variables()) {
             ERR("Failed to setup variables\n");
+            goto err;
+        }
+
+        if (!setup_mor_variables()) {
+            ERR("Failed to setup MOR variables\n");
             goto err;
         }
 
