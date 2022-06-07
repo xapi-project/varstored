@@ -80,6 +80,7 @@
 #include <guid.h>
 #include <serialize.h>
 #include <handler.h>
+#include <mor.h>
 
 struct auth_info {
     const char *pretty_name;
@@ -170,7 +171,7 @@ get_space_usage(void)
 }
 
 /* A limited version of SetVariable for internal use. */
-static EFI_STATUS
+EFI_STATUS
 internal_set_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
                       const uint8_t *data, UINTN data_len, UINT32 attr)
 {
@@ -219,7 +220,7 @@ internal_set_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
 }
 
 /* A limited version of GetVariable for internal use. */
-static EFI_STATUS
+EFI_STATUS
 internal_get_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
                       uint8_t **data, UINTN *data_len)
 {
@@ -1571,6 +1572,16 @@ do_set_variable(uint8_t *comm_buf)
     if ((attr & (EFI_VARIABLE_RUNTIME_ACCESS |
                EFI_VARIABLE_BOOTSERVICE_ACCESS)) == EFI_VARIABLE_RUNTIME_ACCESS) {
         serialize_result(&ptr, EFI_INVALID_PARAMETER);
+        goto err;
+    }
+
+    if (is_mor_control(name, name_len, &guid)) {
+        serialize_result(&ptr, do_set_mor_control(data, data_len, attr, append));
+        goto err;
+    }
+
+    if (is_mor_control_lock(name, name_len, &guid)) {
+        serialize_result(&ptr, do_set_mor_control_lock(data, data_len, attr, append));
         goto err;
     }
 

@@ -81,6 +81,13 @@ bool setup_keys(void);
 bool load_auth_data(void);
 void free_auth_data(void);
 
+EFI_STATUS
+internal_set_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
+                      const uint8_t *data, UINTN data_len, UINT32 attr);
+EFI_STATUS
+internal_get_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
+                      uint8_t **data, UINTN *data_len);
+
 extern bool secure_boot_enable;
 extern bool auth_enforce;
 extern bool persistent;
