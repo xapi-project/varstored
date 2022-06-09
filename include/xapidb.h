@@ -36,10 +36,16 @@
 #include "efi.h"
 
 #define DB_MAGIC "VARS"
-#define DB_VERSION 1
+#define DB_VERSION 2
 /* magic, version, count, data length */
 #define DB_HEADER_LEN \
     (strlen(DB_MAGIC) + sizeof(UINT32) + sizeof(UINTN) + sizeof(UINTN))
+/*
+ * Length of ancillary data prepended to the main variable data.
+ * Currently, it is only the mor_key.
+ */
+#define ANCILLARY_DATA_LEN_V2 8
+#define ANCILLARY_DATA_LEN ANCILLARY_DATA_LEN_V2
 
 #define MAX_FILE_SIZE (128 * 1024)
 

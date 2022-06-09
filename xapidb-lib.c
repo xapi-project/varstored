@@ -46,6 +46,7 @@
 #include <debug.h>
 #include <efi.h>
 #include <handler.h>
+#include <mor.h>
 #include <serialize.h>
 #include <xapidb.h>
 
@@ -179,7 +180,7 @@ xapidb_serialize_variables(uint8_t **out, size_t *out_len, bool only_nv)
         l = l->next;
     }
 
-    buf = malloc(data_len + DB_HEADER_LEN);
+    buf = malloc(data_len + DB_HEADER_LEN + ANCILLARY_DATA_LEN);
     if (!buf) {
         DBG("Failed to allocate memory\n");
         return false;
@@ -193,6 +194,10 @@ xapidb_serialize_variables(uint8_t **out, size_t *out_len, bool only_nv)
     serialize_uint32(&ptr, DB_VERSION);
     serialize_uintn(&ptr, count);
     serialize_uintn(&ptr, data_len);
+
+    /* Ancillary data */
+    memcpy(ptr, mor_key, sizeof(mor_key));
+    ptr += sizeof(mor_key);
 
     while (l) {
         if (only_nv && !(l->attributes & EFI_VARIABLE_NON_VOLATILE)) {
@@ -211,7 +216,7 @@ xapidb_serialize_variables(uint8_t **out, size_t *out_len, bool only_nv)
     }
 
     *out = buf;
-    *out_len = data_len + DB_HEADER_LEN;
+    *out_len = data_len + DB_HEADER_LEN + ANCILLARY_DATA_LEN;
     return true;
 }
 
@@ -595,7 +600,7 @@ xapidb_parse_blob(uint8_t **buf, int len)
     *buf += strlen(DB_MAGIC);
 
     version = unserialize_uint32(buf);
-    if (version != DB_VERSION) {
+    if (version > DB_VERSION) {
         ERR("Unsupported init version\n");
         return false;
     }
@@ -607,7 +612,19 @@ xapidb_parse_blob(uint8_t **buf, int len)
     }
     unserialize_uintn(buf); /* data_len */
 
-    return unserialize_variables(buf, count, len - DB_HEADER_LEN);
+    len -= DB_HEADER_LEN;
+
+    if (version == 2) {
+        if (len < ANCILLARY_DATA_LEN_V2) {
+            ERR("Init file size is invalid\n");
+            return false;
+        }
+
+        unserialize_data_inplace(buf, mor_key, sizeof(mor_key));
+        len -= ANCILLARY_DATA_LEN_V2;
+    }
+
+    return unserialize_variables(buf, count, len);
 }
 
 static bool

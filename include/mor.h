@@ -36,4 +36,7 @@ EFI_STATUS do_set_mor_control(uint8_t *data, UINTN data_len, UINT32 attr, BOOLEA
 EFI_STATUS do_set_mor_control_lock(uint8_t *data, UINTN data_len,
                                    UINT32 attr, BOOLEAN append);
 
+#define MOR_LOCK_REV2_LEN 8
+extern uint8_t mor_key[MOR_LOCK_REV2_LEN];
+
 #endif
