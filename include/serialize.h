@@ -121,10 +121,16 @@ unserialize_data(uint8_t **ptr, UINTN *len, UINTN limit)
 }
 
 static inline void
+unserialize_data_inplace(uint8_t **ptr, uint8_t *buf, UINTN len)
+{
+    memcpy(buf, *ptr, len);
+    *ptr += len;
+}
+
+static inline void
 unserialize_guid(uint8_t **ptr, EFI_GUID *guid)
 {
-    memcpy(guid, *ptr, GUID_LEN);
-    *ptr += GUID_LEN;
+    unserialize_data_inplace(ptr, (uint8_t *)guid, GUID_LEN);
 }
 
 static inline void

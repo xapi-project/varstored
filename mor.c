@@ -48,9 +48,8 @@
 #define MOR_LOCK_REV1_UNLOCK 0
 #define MOR_LOCK_REV1_LOCK 1
 #define MOR_LOCK_REV1_LEN 1
-#define MOR_LOCK_REV2_LEN 8
 
-static uint8_t mor_key[MOR_LOCK_REV2_LEN];
+uint8_t mor_key[MOR_LOCK_REV2_LEN];
 
 static const uint8_t MOR_CONTROL_NAME[] = {'M',0,'e',0,'m',0,'o',0,'r',0,'y',0,'O',0,'v',0,'e',0,'r',0,'w',0,'r',0,'i',0,'t',0,'e',0,'R',0,'e',0,'q',0,'u',0,'e',0,'s',0,'t',0,'C',0,'o',0,'n',0,'t',0,'r',0,'o',0,'l',0};
 static const uint8_t MOR_CONTROL_LOCK_NAME[] = {'M',0,'e',0,'m',0,'o',0,'r',0,'y',0,'O',0,'v',0,'e',0,'r',0,'w',0,'r',0,'i',0,'t',0,'e',0,'R',0,'e',0,'q',0,'u',0,'e',0,'s',0,'t',0,'C',0,'o',0,'n',0,'t',0,'r',0,'o',0,'l',0,'L',0,'o',0,'c',0,'k',0};
