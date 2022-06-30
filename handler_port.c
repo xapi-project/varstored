@@ -26,37 +26,63 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef XAPIDB_H
-#define XAPIDB_H
-
-#include <stdint.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <inttypes.h>
 #include <stdbool.h>
+#include <errno.h>
+#include <sys/mman.h>
 
-#include "backend.h"
-#include "efi.h"
+#include <xenctrl.h>
+#include <debug.h>
+#include <handler_port.h>
 
-#define DB_MAGIC "VARS"
-#define DB_VERSION 2
-/* magic, version, count, data length */
-#define DB_HEADER_LEN \
-    (strlen(DB_MAGIC) + sizeof(UINT32) + sizeof(UINTN) + sizeof(UINTN))
-/*
- * Length of ancillary data prepended to the main variable data.
- * Currently, it is the mor_key and ppi_vdata.
- */
-#define ANCILLARY_DATA_LEN_V2 (8 + 0x104)
-#define ANCILLARY_DATA_LEN ANCILLARY_DATA_LEN_V2
+#include "io_port.h"
 
-#define MAX_FILE_SIZE (128 * 1024)
+#define HANDLER_PORT_ADDRESS 0x0100
 
-extern char *xapidb_arg_uuid;
-extern char *xapidb_arg_socket;
+static struct {
+    xenforeignmemory_handle *fmem;
+    domid_t domid;
+} io_info;
 
-bool xapidb_serialize_variables(uint8_t **out, size_t *out_len, bool only_nv);
-bool xapidb_set_variable(void);
-bool xapidb_parse_blob(uint8_t **buf, int len);
-enum backend_init_status xapidb_init(void);
-enum backend_init_status xapidb_file_init(void);
-bool xapidb_sb_notify(void);
+static void
+io_port_writel(uint64_t offset, uint64_t size, uint32_t val)
+{
+    xen_pfn_t pfns[SHMEM_PAGES];
+    void *shmem;
+    int i;
 
-#endif
+    if (offset != 0 || size != sizeof(uint32_t)) {
+        DBG("Expected size 4, offset 0.  Got %" PRIu64 ", %" PRIu64 ".\n", size, offset);
+        return;
+    }
+
+    for (i = 0; i < SHMEM_PAGES; i++)
+        pfns[i] = val + i;
+    DBG("io_port write\n");
+
+    shmem = xenforeignmemory_map(io_info.fmem,
+                                 io_info.domid,
+                                 PROT_READ | PROT_WRITE,
+                                 SHMEM_PAGES, pfns, NULL);
+    if (!shmem) {
+        DBG("map foreign range failed: %d\n", errno);
+        return;
+    }
+
+    dispatch_command(shmem);
+
+    xenforeignmemory_unmap(io_info.fmem, shmem, SHMEM_PAGES);
+
+}
+
+bool
+setup_handler_io_port(domid_t domid, xenforeignmemory_handle *fmem) {
+    io_info.domid = domid;
+    io_info.fmem = fmem;
+    DBG("port setup for %d\n", domid);
+
+    return register_io_port_writel_handler(HANDLER_PORT_ADDRESS, io_port_writel);
+}
+

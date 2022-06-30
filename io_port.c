@@ -42,51 +42,23 @@
 
 #include <debug.h>
 #include <handler.h>
+#include <ppi.h>
 
 #include "io_port.h"
 
-typedef struct io_port {
-    void            (*writel)(uint64_t offset, uint32_t val);
 
+typedef struct io_port {
+    writel_callback_t *writel;
+    readl_callback_t  *readl;
     xendevicemodel_handle *dmod;
-    xenforeignmemory_handle *fmem;
     domid_t         domid;
     ioservid_t      ioservid;
-    uint32_t        addr;
-    uint32_t        size;
+    uint64_t        addr;
+    uint64_t        size;
     int             enable;
 } io_port_t;
 
 static io_port_t io_port = { .addr = IO_PORT_UNMAPPED };
-
-static void
-io_port_writel(uint64_t offset, uint32_t val)
-{
-    xen_pfn_t pfns[SHMEM_PAGES];
-    void *shmem;
-    int i;
-
-    if (offset != 0) {
-        DBG("Unexpected offset: %lu\n", offset);
-        return;
-    }
-
-    for (i = 0; i < SHMEM_PAGES; i++)
-        pfns[i] = val + i;
-
-    shmem = xenforeignmemory_map(io_port.fmem,
-                                 io_port.domid,
-                                 PROT_READ | PROT_WRITE,
-                                 SHMEM_PAGES, pfns, NULL);
-    if (!shmem) {
-        DBG("map foreign range failed: %d\n", errno);
-        return;
-    }
-
-    dispatch_command(shmem);
-
-    xenforeignmemory_unmap(io_port.fmem, shmem, SHMEM_PAGES);
-}
 
 void
 io_port_deregister(void)
@@ -105,30 +77,131 @@ io_port_deregister(void)
                io_port.addr + io_port.size - 1);
 
     io_port.addr = IO_PORT_UNMAPPED;
+
+    free(io_port.readl);
+    free(io_port.writel);
 }
 
 void
 io_port_write(uint64_t addr, uint64_t size, uint32_t val)
 {
+    uint64_t port_index;
+    uint64_t alignment;
+
     assert(io_port.enable && io_port.addr <= addr
            && addr < (io_port.addr + io_port.size));
 
     addr -= io_port.addr;
+    alignment = addr % sizeof(uint32_t);
 
-    if (size == 4)
-        io_port.writel(addr, val);
-    else
-        DBG("Expected size 4. Got %" PRIu64 ".\n", size);
+    if (size == 0) {
+       DBG("Zero sized write to %" PRIu64 "\n", addr);
+       return;
+    }
+
+    if (size + alignment <= sizeof(uint32_t)) {
+        port_index = addr / sizeof(uint32_t);
+        if (io_port.writel[port_index] != NULL)
+           io_port.writel[port_index](addr - port_index * sizeof(uint32_t), size, val);
+        else
+           DBG("Write to offset %" PRIu64 " not supported.\n", addr);
+    } else {
+        DBG("Write misaligned with ports. Address %" PRIu64 " Size %" PRIu64 ".\n", addr, size);
+    }
+}
+
+uint64_t
+io_port_read(uint64_t addr, uint64_t size)
+{
+    uint32_t port_index;
+    uint64_t alignment;
+
+    assert(io_port.enable && io_port.addr <= addr
+           && addr < (io_port.addr + io_port.size));
+
+    addr -= io_port.addr;
+    alignment = addr % sizeof(uint32_t);
+
+    if (size == 0) {
+       DBG("Zero sized read from %" PRIu64 "\n", addr);
+       return 0;
+    }
+
+    if (size + alignment <= sizeof(uint32_t)) {
+        port_index = addr / sizeof(uint32_t);
+
+        if (io_port.readl[port_index] != NULL) {
+            return (uint64_t) io_port.readl[port_index](addr - port_index * sizeof(uint32_t), size);
+        } else {
+            DBG("Read from offset %" PRIu64 "not supported.\n", addr);
+            return 0;
+        }
+    } else {
+        DBG("Read misaligned with ports. Address %" PRIu64 " Size %" PRIu64 ".\n", addr, size);
+    }
+
+    return 0;
+}
+
+
+static bool
+get_port(uint64_t address, uint32_t *port) {
+
+    if (address < io_port.addr  || address > io_port.addr + io_port.size - sizeof(uint32_t)) {
+        ERR("Failed to register io port handler, address out of range: %016"PRIx64"\n", address);
+        return false;
+    }
+    if ((address - io_port.addr) & 0x3) {
+        ERR("Failed to register io port handler, address not aligned: %016"PRIx64"\n", address);
+        return false;
+    }
+    *port = (address - io_port.addr) >> 2;
+    return true;
+}
+
+bool
+register_io_port_readl_handler(uint64_t address, readl_callback_t callback) {
+    uint32_t port;
+    bool r;
+    r = get_port(address, &port);
+    if (!r)
+       return false;
+    if (io_port.readl[port]) {
+       ERR("Failed to register io_port_handler, handler already exits. address: %016"PRIx64"\n", address);
+       return false;
+    }
+    DBG("Registering read callback at %016"PRIx64"\n", address);
+    io_port.readl[port] = callback;
+    return true;
+}
+
+bool
+register_io_port_writel_handler(uint64_t address, writel_callback_t callback) {
+    uint32_t port;
+    bool r;
+    r = get_port(address, &port);
+    if (!r)
+       return false;
+    if (io_port.readl[port]) {
+       ERR("Failed to register io_port_handler, handler already exits. address: %016"PRIx64"\n", address);
+       return false;
+    }
+    DBG("Registering write callback at %016"PRIx64"\n", address);
+    io_port.writel[port] = callback;
+    return true;
 }
 
 int
-io_port_initialize(xendevicemodel_handle *dmod, xenforeignmemory_handle *fmem,
-                   domid_t domid, ioservid_t ioservid)
+io_port_initialize(xendevicemodel_handle *dmod,
+                   domid_t domid, ioservid_t ioservid,
+                   uint64_t addr, uint64_t size)
 {
     int rc;
+    size_t num_32bit_ports = size / sizeof(uint32_t);
+
+    assert(num_32bit_ports < UINT32_MAX);
 
     io_port.dmod = dmod;
-    io_port.fmem = fmem;
     io_port.domid = domid;
     io_port.ioservid = ioservid;
 
@@ -137,13 +210,12 @@ io_port_initialize(xendevicemodel_handle *dmod, xenforeignmemory_handle *fmem,
         return -1;
     }
 
-    io_port.writel = io_port_writel;
+    io_port.writel = calloc(num_32bit_ports, sizeof(*io_port.writel));
+    io_port.readl = calloc(num_32bit_ports, sizeof(*io_port.readl));
 
-    /* Large enough for accepting 32-bit write. */
-    io_port.size = 4;
-
+    io_port.size = size;
     io_port.enable = 1;
-    io_port.addr = IO_PORT_ADDRESS;
+    io_port.addr = addr;
 
     rc = xendevicemodel_map_io_range_to_ioreq_server(
              dmod,
@@ -159,7 +231,7 @@ io_port_initialize(xendevicemodel_handle *dmod, xenforeignmemory_handle *fmem,
         return -1;
     }
 
-    DBG("map IO port: %016"PRIx32" - %016"PRIx32"\n", io_port.addr,
+    DBG("map IO port: %016"PRIx64" - %016"PRIx64"\n", io_port.addr,
         io_port.addr + io_port.size - 1);
 
     return 0;

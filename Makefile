@@ -3,8 +3,11 @@ TARGET = varstored
 OBJS :=	guid.o \
 	depriv.o \
 	handler.o \
+	handler_port.o \
 	io_port.o \
 	mor.o \
+	ppi.o \
+	ppi_vdata.o \
 	varstored.o \
 	xapidb.o \
 	xapidb-lib.o
@@ -63,6 +66,7 @@ TOOLOBJS := tools/xapidb-cmdline.o \
             guid.o \
             handler.o \
             mor.o \
+            ppi_vdata.o \
             xapidb-lib.o
 TOOLS := tools/varstore-ls \
          tools/varstore-get \
