@@ -65,8 +65,9 @@
 
 #include <debug.h>
 #include <depriv.h>
-#include <handler.h>
+#include <handler_port.h>
 #include <mor.h>
+#include <ppi.h>
 #include <backend.h>
 
 #include "io_port.h"
@@ -78,6 +79,7 @@
 # define smp_mb()  asm volatile ( "lock addl $0, -32(%%rsp)" ::: "memory" )
 #endif
 
+#define IO_PORT_ADDRESS 0x0100
 #define XS_VARSTORED_PID_PATH "/local/domain/%u/varstored-pid"
 
 enum {
@@ -121,6 +123,8 @@ static const char *varstored_option_text[] = {
     "<name>:<val>",
 };
 
+const size_t num_io_port = 3;
+
 static sig_atomic_t run_main_loop = 0;
 
 static const char *prog;
@@ -130,7 +134,7 @@ static bool opt_depriv;
 static uid_t opt_uid;
 static gid_t opt_gid;
 static char *opt_chroot;
-const enum log_level log_level = LOG_LVL_INFO;
+const enum log_level log_level = LOG_LVL_DEBUG;
 
 static void __attribute__((noreturn))
 usage(void)
@@ -255,14 +259,18 @@ create_pidfile(const char *path)
 static void
 handle_pio(ioreq_t *ioreq)
 {
-    if (ioreq->dir == IOREQ_READ) {
-        DBG("IO request not WRITE. Doing nothing.\n");
-    } else if (ioreq->dir == IOREQ_WRITE) {
-        if (!ioreq->data_is_ptr) {
-            io_port_write(ioreq->addr, ioreq->size, (uint32_t)ioreq->data);
-        } else {
-            assert(0);
-        }
+    assert(!ioreq->data_is_ptr);
+
+    switch (ioreq->dir) {
+    case IOREQ_READ:
+        ioreq->data = io_port_read(ioreq->addr, ioreq->size);
+        break;
+
+    case IOREQ_WRITE:
+        io_port_write(ioreq->addr, ioreq->size, (uint32_t)ioreq->data);
+        break;
+    default:
+        assert(0);
     }
 }
 
@@ -441,10 +449,22 @@ varstored_initialize(domid_t domid)
             varstored_state.iopage->vcpu_ioreq[i].vp_eport,
             varstored_state.ioreq_local_port[i]);
 
-    rc = io_port_initialize(varstored_state.dmod, varstored_state.fmem,
-                            varstored_state.domid, varstored_state.ioservid);
+    rc = io_port_initialize(varstored_state.dmod, varstored_state.domid,
+                            varstored_state.ioservid,
+                            IO_PORT_ADDRESS,  sizeof(uint32_t) * num_io_port );
     if (rc < 0)
         goto err;
+
+
+    if (!setup_handler_io_port(varstored_state.domid, varstored_state.fmem)) {
+        ERR("Failed to setup handler IO port\n");
+        goto err;
+    }
+
+    if (!setup_ppi_port()) {
+       ERR("Failed to setup PPI IO port\n");
+       goto err;
+    }
 
     /* Load auth data _before_ chrooting. */
     if (!load_auth_data())
@@ -496,6 +516,11 @@ varstored_initialize(domid_t domid)
 
         if (!setup_mor_variables()) {
             ERR("Failed to setup MOR variables\n");
+            goto err;
+        }
+
+        if (!setup_ppi_variables()) {
+            ERR("Failed to setup PPI variables\n");
             goto err;
         }
 

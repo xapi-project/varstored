@@ -26,37 +26,21 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef XAPIDB_H
-#define XAPIDB_H
+#ifndef PPI_H
+#define PPI_H
 
-#include <stdint.h>
 #include <stdbool.h>
+#include <stdint.h>
 
-#include "backend.h"
-#include "efi.h"
+typedef struct {
+          uint32_t idx;
+          uint8_t func[256];
+} ppi_vdata_t;
 
-#define DB_MAGIC "VARS"
-#define DB_VERSION 2
-/* magic, version, count, data length */
-#define DB_HEADER_LEN \
-    (strlen(DB_MAGIC) + sizeof(UINT32) + sizeof(UINTN) + sizeof(UINTN))
-/*
- * Length of ancillary data prepended to the main variable data.
- * Currently, it is the mor_key and ppi_vdata.
- */
-#define ANCILLARY_DATA_LEN_V2 (8 + 0x104)
-#define ANCILLARY_DATA_LEN ANCILLARY_DATA_LEN_V2
 
-#define MAX_FILE_SIZE (128 * 1024)
+extern ppi_vdata_t ppi_vdata;
 
-extern char *xapidb_arg_uuid;
-extern char *xapidb_arg_socket;
-
-bool xapidb_serialize_variables(uint8_t **out, size_t *out_len, bool only_nv);
-bool xapidb_set_variable(void);
-bool xapidb_parse_blob(uint8_t **buf, int len);
-enum backend_init_status xapidb_init(void);
-enum backend_init_status xapidb_file_init(void);
-bool xapidb_sb_notify(void);
+bool setup_ppi_port(void);
+bool setup_ppi_variables(void);
 
 #endif

@@ -33,14 +33,21 @@
 #include <xenforeignmemory.h>
 
 #define IO_PORT_UNMAPPED (~(0u))
-#define IO_PORT_ADDRESS 0x0100
+
+typedef void (*writel_callback_t)(uint64_t offset, uint64_t size, uint32_t val);
+typedef uint32_t (*readl_callback_t)(uint64_t offset, uint64_t size);
+
+bool register_io_port_readl_handler(uint64_t address, readl_callback_t callback);
+bool register_io_port_writel_handler(uint64_t address, writel_callback_t callback);
+
 
 void io_port_deregister(void);
 
 void io_port_write(uint64_t addr, uint64_t sizem, uint32_t val);
+uint64_t io_port_read(uint64_t addr, uint64_t size);
 int  io_port_initialize(xendevicemodel_handle *dmod,
-                        xenforeignmemory_handle *fmem,
                         domid_t domid,
-                        ioservid_t ioservid);
+                        ioservid_t ioservid,
+                        uint64_t addr, uint64_t size);
 
 #endif /* _IO_PORT_H */
