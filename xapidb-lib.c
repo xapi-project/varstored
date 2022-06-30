@@ -37,6 +37,7 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <assert.h>
 
 #include <libxml/parser.h>
 #include <libxml/xpath.h>
@@ -47,6 +48,7 @@
 #include <efi.h>
 #include <handler.h>
 #include <mor.h>
+#include <ppi.h>
 #include <serialize.h>
 #include <xapidb.h>
 
@@ -179,6 +181,7 @@ xapidb_serialize_variables(uint8_t **out, size_t *out_len, bool only_nv)
         count++;
         l = l->next;
     }
+    assert(ANCILLARY_DATA_LEN == sizeof(mor_key) + sizeof(ppi_vdata));
 
     buf = malloc(data_len + DB_HEADER_LEN + ANCILLARY_DATA_LEN);
     if (!buf) {
@@ -198,6 +201,9 @@ xapidb_serialize_variables(uint8_t **out, size_t *out_len, bool only_nv)
     /* Ancillary data */
     memcpy(ptr, mor_key, sizeof(mor_key));
     ptr += sizeof(mor_key);
+
+    memcpy(ptr, &ppi_vdata, sizeof(ppi_vdata));
+    ptr += sizeof(ppi_vdata);
 
     while (l) {
         if (only_nv && !(l->attributes & EFI_VARIABLE_NON_VOLATILE)) {
@@ -621,6 +627,8 @@ xapidb_parse_blob(uint8_t **buf, int len)
         }
 
         unserialize_data_inplace(buf, mor_key, sizeof(mor_key));
+        unserialize_data_inplace(buf, (uint8_t *) &ppi_vdata, sizeof(ppi_vdata));
+
         len -= ANCILLARY_DATA_LEN_V2;
     }
 
