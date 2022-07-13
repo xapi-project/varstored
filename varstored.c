@@ -134,7 +134,7 @@ static bool opt_depriv;
 static uid_t opt_uid;
 static gid_t opt_gid;
 static char *opt_chroot;
-const enum log_level log_level = LOG_LVL_DEBUG;
+const enum log_level log_level = LOG_LVL_INFO;
 
 static void __attribute__((noreturn))
 usage(void)
