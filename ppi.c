@@ -36,11 +36,10 @@
 #include <debug.h>
 #include <ppi.h>
 #include <efi.h>
+#include <guid.h>
 #include "io_port.h"
 
 static const uint8_t PPI_NAME[] = {'P',0,'P',0,'I',0,'B',0,'u',0,'f',0,'f',0,'e',0,'r',0};
-const EFI_GUID ppiBufferGuid =
-    {{0xbe, 0x39, 0x09, 0xe2, 0xd4, 0x32, 0xbe, 0x41, 0xa1, 0x50, 0x89, 0x7f, 0x85, 0xd4, 0x98, 0x29}};
 
 #define PPI_IDX_ADDRESS  0x0104
 #define PPI_DATA_ADDRESS 0x0108
@@ -56,21 +55,22 @@ setup_ppi_variables(void)
     EFI_STATUS status;
     UINTN data_len;
     uint8_t *data;
+    uint8_t unlocked = 0;
 
     status = internal_get_variable(PPI_NAME,
                                    sizeof(PPI_NAME),
-                                   &ppiBufferGuid, &data, &data_len);
+                                   &gEfiTcg2PpiXenGuid, &data, &data_len);
     if (status == EFI_NOT_FOUND) {
         uint8_t buf[PPI_NONVOLITILE_SIZE] = {0};
 
         status = internal_set_variable(PPI_NAME,
                                        sizeof(PPI_NAME),
-                                       &ppiBufferGuid,
+                                       &gEfiTcg2PpiXenGuid,
                                        buf,
                                        sizeof(buf),
                                        ATTR_BRNV);
         if (status != EFI_SUCCESS) {
-            ERR("internal_set_variable returned 0x%016lx\n", status);
+            ERR("internal_set_variable(PPIBuffer) returned 0x%016lx\n", status);
             return false;
         }
     } else {
@@ -79,6 +79,17 @@ setup_ppi_variables(void)
            return false;
         }
         free(data);
+    }
+
+    status = internal_set_variable(TCG2_PHYSICAL_PRESENCEFLAGSLOCK_NAME,
+                                   TCG2_PHYSICAL_PRESENCEFLAGSLOCK_NAME_SIZE,
+                                   &gEfiTcg2PpiXenGuid,
+                                   &unlocked,
+                                   sizeof(uint8_t),
+                                   ATTR_BRNV);
+    if (status != EFI_SUCCESS) {
+        ERR("internal_set_variable(PPILock) returned 0x%016lx\n", status);
+        return false;
     }
 
     return true;
@@ -110,7 +121,7 @@ ppi_data_readl(uint64_t offset, uint64_t size)
         UINTN data_len;
         status = internal_get_variable(PPI_NAME,
                                        sizeof(PPI_NAME),
-                                       &ppiBufferGuid, &data, &data_len);
+                                       &gEfiTcg2PpiXenGuid, &data, &data_len);
 
         if (status == EFI_SUCCESS) {
             memcpy(&ret, data + offset + (ppi_vdata.idx - PPI_VOLATILE_SIZE), size);
@@ -142,13 +153,13 @@ ppi_data_port_writel(uint64_t offset, uint64_t size, uint32_t val)
             UINTN data_len;
             status = internal_get_variable(PPI_NAME,
                                            sizeof(PPI_NAME),
-                                           &ppiBufferGuid, &data, &data_len);
+                                           &gEfiTcg2PpiXenGuid, &data, &data_len);
 
             if (status == EFI_SUCCESS) {
                 memcpy(data + (ppi_vdata.idx - PPI_VOLATILE_SIZE), &val, size);
                 status = internal_set_variable(PPI_NAME,
                                               sizeof(PPI_NAME),
-                                              &ppiBufferGuid,
+                                              &gEfiTcg2PpiXenGuid,
                                               data,
                                               data_len,
                                               ATTR_BRNV);

@@ -35,5 +35,6 @@ extern const EFI_GUID gEfiGlobalVariableGuid;
 extern const EFI_GUID gEfiCertX509Guid;
 extern const EFI_GUID gEfiCertPkcs7Guid;
 extern const EFI_GUID gEfiImageSecurityDatabaseGuid;
+extern const EFI_GUID gEfiTcg2PpiXenGuid;
 
 #endif
