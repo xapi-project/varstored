@@ -88,6 +88,9 @@ EFI_STATUS
 internal_get_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
                       uint8_t **data, UINTN *data_len);
 
+extern const uint8_t TCG2_PHYSICAL_PRESENCEFLAGSLOCK_NAME[];
+extern const size_t TCG2_PHYSICAL_PRESENCEFLAGSLOCK_NAME_SIZE;
+
 extern bool secure_boot_enable;
 extern bool auth_enforce;
 extern bool persistent;
