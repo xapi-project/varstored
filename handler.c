@@ -81,6 +81,7 @@
 #include <serialize.h>
 #include <handler.h>
 #include <mor.h>
+#include <ppi.h>
 
 struct auth_info {
     const char *pretty_name;
@@ -127,6 +128,18 @@ static const uint8_t EFI_PLATFORM_KEY_NAME[] = {'P',0,'K',0};
 static const uint8_t EFI_KEY_EXCHANGE_KEY_NAME[] = {'K',0,'E',0,'K',0};
 static const uint8_t EFI_SECURE_BOOT_MODE_NAME[] = {'S',0,'e',0,'c',0,'u',0,'r',0,'e',0,'B',0,'o',0,'o',0,'t',0};
 static const uint8_t EFI_SIGNATURE_SUPPORT_NAME[] = {'S',0,'i',0,'g',0,'n',0,'a',0,'t',0,'u',0,'r',0,'e',0,'S',0,'u',0,'p',0,'p',0,'o',0,'r',0,'t',0};
+
+const uint8_t TCG2_PHYSICAL_PRESENCEFLAGSLOCK_NAME[] = {
+    'T', 0, 'c', 0, 'g', 0, '2', 0, 'P', 0, 'h', 0, 'y', 0, 's', 0, 'i', 0, 'c', 0, 'a', 0, 'l', 0, 'P', 0, 'r', 0, 'e', 0,
+    's', 0, 'e', 0, 'n', 0, 'c', 0, 'e', 0, 'F', 0, 'l', 0, 'a', 0, 'g', 0, 's', 0, 'L', 0, 'o', 0, 'c', 0,'k', 0
+};
+const size_t TCG2_PHYSICAL_PRESENCEFLAGSLOCK_NAME_SIZE = sizeof(TCG2_PHYSICAL_PRESENCEFLAGSLOCK_NAME);
+
+static const uint8_t TCG2_PHYSICAL_PRESENCEFLAGS_NAME[] = {
+     'T', 0, 'c', 0, 'g', 0, '2', 0, 'P', 0, 'h', 0, 'y', 0, 's', 0, 'i', 0, 'c', 0, 'a', 0, 'l', 0, 'P', 0, 'r', 0, 'e', 0,
+     's', 0, 'e', 0, 'n', 0, 'c', 0, 'e', 0, 'F', 0, 'l', 0, 'a', 0, 'g', 0, 's', 0
+};
+
 static const uint8_t EFI_IMAGE_SECURITY_DATABASE[] = {'d',0,'b',0};
 static const uint8_t EFI_IMAGE_SECURITY_DATABASE1[] = {'d',0,'b',0,'x',0};
 static const uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
@@ -1281,6 +1294,52 @@ out:
     return status;
 }
 
+static EFI_STATUS
+check_ppi_variables(uint8_t *name, UINTN name_len, EFI_GUID *guid, uint8_t *data, UINTN data_len)
+{
+    if (name_len == sizeof(TCG2_PHYSICAL_PRESENCEFLAGSLOCK_NAME) &&
+            !memcmp(name, TCG2_PHYSICAL_PRESENCEFLAGSLOCK_NAME, name_len) &&
+            !memcmp(guid, &gEfiTcg2PpiXenGuid, GUID_LEN)) {
+       if (data_len != sizeof (uint8_t)) {
+           DBG("Bad PPI lock write. size=%lu\n", data_len);
+           return EFI_INVALID_PARAMETER;
+       }
+       if (*data != 1) {
+           DBG("Bad PPI lock write. data=%hu\n", *data);
+           return EFI_INVALID_PARAMETER;
+       }
+       DBG("PPI lock set!\n");
+       return EFI_SUCCESS;
+    }
+
+    if ((name_len == sizeof(TCG2_PHYSICAL_PRESENCEFLAGS_NAME) &&
+            !memcmp(name, TCG2_PHYSICAL_PRESENCEFLAGS_NAME, name_len)) &&
+            !memcmp(guid, &gEfiTcg2PpiXenGuid, GUID_LEN)) {
+
+        EFI_STATUS status;
+        UINTN lock_len;
+        uint8_t *lock_data;
+
+        status = internal_get_variable(TCG2_PHYSICAL_PRESENCEFLAGSLOCK_NAME,
+                                       sizeof(TCG2_PHYSICAL_PRESENCEFLAGSLOCK_NAME),
+                                       &gEfiTcg2PpiXenGuid, &lock_data, &lock_len);
+        if (status == EFI_SUCCESS) {
+
+            if (lock_len != sizeof(uint8_t) ||
+                *lock_data != 0) {
+                DBG("Attempt to set PPI flags while locked! Lock length %lu, value: %hu \n", lock_len, lock_len ? *lock_data : 0xff);
+                free(lock_data);
+                return EFI_WRITE_PROTECTED;
+            }
+            free(lock_data);
+        } else {
+           DBG("Attempt to set PPI flags while, but getting lock returned 0x%016lx\n", status);
+           return status;
+        }
+    }
+    return EFI_SUCCESS;
+}
+
 static bool
 check_ro_variable(uint8_t *name, UINTN name_len, EFI_GUID *guid)
 {
@@ -1610,6 +1669,11 @@ do_set_variable(uint8_t *comm_buf)
                 goto err;
             }
 
+            status = check_ppi_variables(name, name_len, &guid, data, data_len);
+            if (status != EFI_SUCCESS) {
+                serialize_result(&ptr, status);
+                goto err;
+            }
             if (attr & EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS) {
                 uint8_t *payload;
                 UINTN payload_len;
