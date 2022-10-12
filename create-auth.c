@@ -57,51 +57,56 @@ static const EFI_GUID citrix_guid =
 static const EFI_GUID microsoft_guid =
     {{0xbd, 0x9a, 0xfa, 0x77, 0x59, 0x03, 0x32, 0x4d, 0xbd, 0x60, 0x28, 0xf4, 0xe7, 0x8f, 0x78, 0x4b}};
 
-/* Converts an array of X509 certificates into an EFI_SIGNATURE_LIST */
-static EFI_SIGNATURE_LIST *
+/*
+ * Converts an array of X509 certificates into a list of EFI_SIGNATURE_LISTs,
+ * each container a single certificate. data_len is set to the total output
+ * length.
+ */
+static uint8_t *
 certs_to_sig_list(X509 **cert, int count, UINTN *data_len,
                   const EFI_GUID *vendor_guid)
 {
     int i, len;
-    uint8_t *ptr;
-    EFI_SIGNATURE_LIST *data;
+    size_t offset = 0;
+    uint8_t *data = NULL, *ptr;
+    EFI_SIGNATURE_LIST *sig_list;
     EFI_SIGNATURE_DATA *sig_data;
-    UINT32 signature_size = 0;
 
+    *data_len = 0;
     for (i = 0; i < count; i++) {
         len = i2d_X509(cert[i], NULL);
         if (len < 0) {
             printf("i2d_X509 failed\n");
             exit(1);
         }
-        if (len > signature_size)
-            signature_size = len;
-    }
-    signature_size += offsetof(EFI_SIGNATURE_DATA, SignatureData);
+        *data_len += sizeof(EFI_SIGNATURE_LIST) + offsetof(EFI_SIGNATURE_DATA, SignatureData) + len;
 
-    *data_len = sizeof(EFI_SIGNATURE_LIST) + count * signature_size;
-    data = malloc(*data_len);
-    if (!data) {
-        printf("Out of memory!\n");
-        exit(1);
-    }
+        data = realloc(data, *data_len);
+        if (!data) {
+            printf("Out of memory!\n");
+            exit(1);
+        }
 
-    data->SignatureListSize = *data_len;
-    data->SignatureSize = signature_size;
-    data->SignatureHeaderSize = 0;
-    memcpy(&data->SignatureType, &gEfiCertX509Guid, GUID_LEN);
+        /* Write SignatureList header */
+        sig_list = (EFI_SIGNATURE_LIST *)(data + offset);
+        sig_list->SignatureHeaderSize = 0;
+        sig_list->SignatureSize = offsetof(EFI_SIGNATURE_DATA, SignatureData) + len;
+        sig_list->SignatureListSize = sizeof(EFI_SIGNATURE_LIST) + sig_list->SignatureSize;
+        memcpy(&sig_list->SignatureType, &gEfiCertX509Guid, GUID_LEN);
+        offset += sizeof(EFI_SIGNATURE_LIST);
 
-    for (i = 0; i < count; i++) {
-        ptr = (uint8_t *)data + sizeof(EFI_SIGNATURE_LIST) +
-            i * signature_size + offsetof(EFI_SIGNATURE_DATA, SignatureData);
+        /* Write first and only SignatureData header */
+        sig_data = (EFI_SIGNATURE_DATA *)(data + offset);
+        memcpy(&sig_data->SignatureOwner, vendor_guid, GUID_LEN);
+        offset += offsetof(EFI_SIGNATURE_DATA, SignatureData);
+
+        /* Write certificate */
+        ptr = data + offset;
         if (i2d_X509(cert[i], &ptr) < 0) {
             printf("i2d_X509 failed\n");
             exit(1);
         }
-
-        sig_data = (EFI_SIGNATURE_DATA *)((uint8_t *)data +
-                   sizeof(EFI_SIGNATURE_LIST) + i * signature_size);
-        memcpy(&sig_data->SignatureOwner, vendor_guid, GUID_LEN);
+        offset += len;
     }
 
     return data;
@@ -366,7 +371,7 @@ int main(int argc, char **argv)
     timestamp.Daylight = 0;
     timestamp.Pad2 = 0;
 
-    data = (uint8_t *)certs_to_sig_list(cert, count, &data_len, vendor_guid);
+    data = certs_to_sig_list(cert, count, &data_len, vendor_guid);
     sig = sign_data(sign_cert, sign_key, name, name_len, guid, attr,
                     &timestamp, data, data_len, &sig_len);
     descriptor = (uint8_t *)create_descriptor(sig_len, &timestamp, &descriptor_len);
