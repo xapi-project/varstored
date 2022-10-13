@@ -6,7 +6,9 @@ test.dat
 create-auth
 PK.auth
 KEK.auth
+KEK.list
 db.auth
+db.list
 *.key
 PK.pem
 testPK.pem
