@@ -87,7 +87,7 @@ test.o: test.c
 test: test.o guid.o
 	$(CC) -o $@ $(LDFLAGS) $^ -lcrypto $$(pkg-config --libs glib-2.0)
 
-TESTKEYS := testPK.pem testPK.key testcertA.pem testcertB.pem testcertB.key
+TESTKEYS := testPK.pem testPK.key testcertA.pem testcertA.key testcertB.pem testcertB.key
 
 TESTDEPS := test $(TESTKEYS) guid.o
 
