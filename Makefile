@@ -105,7 +105,7 @@ auth: $(AUTHS)
 .PHONY: auth
 
 create-auth: create-auth.c guid.o
-	$(CC) -Wall -o create-auth create-auth.c guid.o -Iinclude -lcrypto
+	$(CC) -o $@ $(CFLAGS) create-auth.c guid.o -Iinclude -lcrypto
 
 %.pem %.key:
 	openssl req -new -x509 -newkey rsa:2048 -subj "/CN=$*/" -keyout $*.key -out $*.pem -days 36500 -nodes -sha256
