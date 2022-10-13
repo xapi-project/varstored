@@ -119,6 +119,12 @@ KEK.auth: create-auth PK.pem PK.key KEK.list
 db.auth: create-auth PK.pem PK.key db.list
 	./create-auth -k PK.key -c PK.pem db db.auth $$(cat db.list)
 
+db.list:
+	echo certs/MicWinProPCA2011_2011-10-19.pem certs/MicCorUEFCA2011_2011-06-27.pem > $@
+
+KEK.list:
+	echo certs/MicCorKEKCA2011_2011-06-24.pem > $@
+
 clean:
 	$(foreach dir,$(SUBDIRS),make -C $(dir) clean)
 	rm -f $(OBJS)
@@ -129,7 +135,7 @@ clean:
 	rm -f $(TESTKEYS)
 	rm -f $(AUTHS)
 	rm -f create-auth
-	rm -f PK.pem PK.key
+	rm -f PK.pem PK.key KEK.auth KEK.list db.auth db.list
 	rm -f $(TOOLS) $(TOOLOBJS) $(TOOLS:%=%.o)
 
 .PHONY: TAGS
