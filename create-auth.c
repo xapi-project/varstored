@@ -193,6 +193,7 @@ sign_data(X509 *cert, EVP_PKEY *key, const uint8_t *name, UINTN name_len,
     }
     *sig_len = p7_len;
 
+    PKCS7_free(p7);
     BIO_free(bio);
     free(buf);
 
