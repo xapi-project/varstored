@@ -2138,6 +2138,7 @@ set_variable_from_auth(const uint8_t *name, UINTN name_len, const EFI_GUID *guid
 {
     uint8_t buf[SHMEM_SIZE];
     uint8_t *ptr;
+    EFI_STATUS status;
     UINT32 attr = ATTR_BRNV_TIME;
 
     if (append)
@@ -2154,12 +2155,13 @@ set_variable_from_auth(const uint8_t *name, UINTN name_len, const EFI_GUID *guid
     dispatch_command(buf);
 
     ptr = buf;
-    if (unserialize_uintn(&ptr) == EFI_SUCCESS) {
-        return true;
-    } else {
-        DBG("Failed to execute auth data\n");
+    status = unserialize_uintn(&ptr);
+    if (status != EFI_SUCCESS) {
+        ERR("Failed to execute auth data: 0x%lx\n", status);
         return false;
     }
+
+    return true;
 }
 
 bool
