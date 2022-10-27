@@ -90,6 +90,7 @@ struct auth_info {
     const EFI_GUID *guid;
     const char *path;
     bool append;
+    bool required;
     uint8_t *data;
     off_t data_len;
 };
@@ -154,13 +155,13 @@ static const uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
  */
 static struct auth_info auth_info[] = {
     {"dbx", EFI_IMAGE_SECURITY_DATABASE1, sizeof(EFI_IMAGE_SECURITY_DATABASE1),
-     &gEfiImageSecurityDatabaseGuid, AUTH_PATH_PREFIX "/dbx.auth", true},
+     &gEfiImageSecurityDatabaseGuid, AUTH_PATH_PREFIX "/dbx.auth", true, false},
     {"db", EFI_IMAGE_SECURITY_DATABASE, sizeof(EFI_IMAGE_SECURITY_DATABASE),
-     &gEfiImageSecurityDatabaseGuid, AUTH_PATH_PREFIX "/db.auth", false},
+     &gEfiImageSecurityDatabaseGuid, AUTH_PATH_PREFIX "/db.auth", false, true},
     {"KEK", EFI_KEY_EXCHANGE_KEY_NAME, sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
-     &gEfiGlobalVariableGuid, AUTH_PATH_PREFIX "/KEK.auth", false},
+     &gEfiGlobalVariableGuid, AUTH_PATH_PREFIX "/KEK.auth", false, true},
     {"PK", EFI_PLATFORM_KEY_NAME, sizeof(EFI_PLATFORM_KEY_NAME),
-     &gEfiGlobalVariableGuid, AUTH_PATH_PREFIX "/PK.auth", false},
+     &gEfiGlobalVariableGuid, AUTH_PATH_PREFIX "/PK.auth", false, true},
 };
 
 struct efi_variable *var_list;
@@ -2171,11 +2172,19 @@ setup_keys(void)
         if (!auth_info[i].data) {
             WARN("Cannot setup %s because auth data is missing!\n",
                  auth_info[i].pretty_name);
+
+            if (!auth_info[i].required) {
+                INFO("Continuing keys setup despite missing optional %s\n",
+                    auth_info[i].pretty_name);
+                continue;
+            }
+
             /*
              * Skip setting the rest of the keys (in particular, PK).
              * Otherwise the platform may be in user mode without
              * KEK/db set which will cause in-guest dbx updates to fail.
              */
+            WARN("Aborting keys setup\n");
             return true;
         }
 
