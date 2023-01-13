@@ -144,7 +144,7 @@ static const uint8_t EFI_IMAGE_SECURITY_DATABASE[] = {'d',0,'b',0};
 static const uint8_t EFI_IMAGE_SECURITY_DATABASE1[] = {'d',0,'b',0,'x',0};
 static const uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
 
-#define AUTH_PATH_PREFIX "/usr/share/varstored"
+#define AUTH_PATH_PREFIX "/var/lib/varstored"
 
 /*
  * Array of auth_info structs containing the information about the keys
