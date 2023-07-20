@@ -189,6 +189,17 @@ initialize_settings(struct xs_handle *xsh, domid_t domid)
 
     INFO("Secure boot enable: %s\n", secure_boot_enable ? "true" : "false");
 
+    if (secure_boot_enable) {
+        snprintf(path, sizeof(path),
+                 "/local/domain/%u/platform/secureboot-enforce", domid);
+        s = xs_read(xsh, XBT_NULL, path, NULL);
+
+        secure_boot_enforce = s && !strcmp(s, "true");
+        free(s);
+
+        INFO("Secure boot enforcing: %s\n", secure_boot_enforce ? "true" : "false");
+    }
+
     snprintf(path, sizeof(path),
              "/local/domain/%u/platform/auth-enforce", domid);
     s = xs_read(xsh, XBT_NULL, path, NULL);
@@ -530,6 +541,11 @@ varstored_initialize(domid_t domid)
                 goto err;
             }
         }
+    }
+
+    if (!check_secure_boot()) {
+        ERR("Secure boot is required, but isn't activated\n");
+        goto err;
     }
 
     free_auth_data();

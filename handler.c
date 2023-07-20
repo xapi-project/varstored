@@ -165,6 +165,7 @@ static struct auth_info auth_info[] = {
 
 struct efi_variable *var_list;
 bool secure_boot_enable;
+bool secure_boot_enforce;
 bool auth_enforce = true;
 bool persistent = true;
 
@@ -2054,6 +2055,30 @@ void dispatch_command(uint8_t *comm_buf)
         DBG("Unknown command\n");
         break;
     };
+}
+
+bool
+check_secure_boot(void)
+{
+    EFI_STATUS status;
+    uint8_t *data;
+    UINTN data_len;
+    bool ret;
+
+    if (!secure_boot_enforce)
+        return true;
+
+    status = internal_get_variable(EFI_SECURE_BOOT_MODE_NAME,
+                                   sizeof(EFI_SECURE_BOOT_MODE_NAME),
+                                   &gEfiGlobalVariableGuid, &data, &data_len);
+
+    if (status != EFI_SUCCESS)
+        return false;
+
+    ret = data[0] ? true : false;
+    free(data);
+
+    return ret;
 }
 
 bool
