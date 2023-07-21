@@ -2072,11 +2072,15 @@ check_secure_boot(void)
                                    sizeof(EFI_SECURE_BOOT_MODE_NAME),
                                    &gEfiGlobalVariableGuid, &data, &data_len);
 
-    if (status != EFI_SUCCESS)
-        return false;
+    if (status != EFI_SUCCESS) {
+        ret = false;
+    } else  {
+        ret = data[0] ? true : false;
+        free(data);
+    }
 
-    ret = data[0] ? true : false;
-    free(data);
+    if (!ret)
+        db->sb_notify();
 
     return ret;
 }
