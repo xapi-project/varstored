@@ -112,7 +112,7 @@ int main(int argc, char **argv)
     do_rm(&gEfiImageSecurityDatabaseGuid, "dbx");
 
     if (!strcmp(argv[optind + 1], "user"))
-        return setup_keys();
+        return (setup_keys() ? 0 : 1);
     else
         return 0;
 }
