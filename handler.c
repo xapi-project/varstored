@@ -148,6 +148,20 @@ static const uint8_t EFI_IMAGE_SECURITY_DATABASE2[] = {'d',0,'b',0,'t',0};
 #define AUTH_PATH_PREFIX "/var/lib/varstored"
 
 /*
+ * The macro AUTH_ONLY_PK_REQUIRED makes KEK and DB files optional, allowing
+ * varstored and varstore-sb-state to copy only the PK file (which is always
+ * present) and switch the VM to user mode. This will prevent the VM to boot
+ * if it has SecureBoot enabled by the user but UEFI certificates are missing.
+ */
+#ifdef AUTH_ONLY_PK_REQUIRED
+#define AUTH_DB_REQUIRED false
+#define AUTH_KEK_REQUIRED false
+#else
+#define AUTH_DB_REQUIRED true
+#define AUTH_KEK_REQUIRED true
+#endif
+
+/*
  * Array of auth_info structs containing the information about the keys
  * we need. Avoid switching to user mode before importing other keys by
  * importing PK key last, otherwise this would require signing other keys
@@ -157,9 +171,9 @@ static struct auth_info auth_info[] = {
     {"dbx", EFI_IMAGE_SECURITY_DATABASE1, sizeof(EFI_IMAGE_SECURITY_DATABASE1),
      &gEfiImageSecurityDatabaseGuid, AUTH_PATH_PREFIX "/dbx.auth", true, false},
     {"db", EFI_IMAGE_SECURITY_DATABASE, sizeof(EFI_IMAGE_SECURITY_DATABASE),
-     &gEfiImageSecurityDatabaseGuid, AUTH_PATH_PREFIX "/db.auth", false, true},
+     &gEfiImageSecurityDatabaseGuid, AUTH_PATH_PREFIX "/db.auth", false, AUTH_DB_REQUIRED},
     {"KEK", EFI_KEY_EXCHANGE_KEY_NAME, sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
-     &gEfiGlobalVariableGuid, AUTH_PATH_PREFIX "/KEK.auth", false, true},
+     &gEfiGlobalVariableGuid, AUTH_PATH_PREFIX "/KEK.auth", false, AUTH_KEK_REQUIRED},
     {"PK", EFI_PLATFORM_KEY_NAME, sizeof(EFI_PLATFORM_KEY_NAME),
      &gEfiGlobalVariableGuid, AUTH_PATH_PREFIX "/PK.auth", false, true},
 };
