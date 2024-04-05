@@ -19,6 +19,9 @@ CFLAGS  = -I$(shell pwd)/include
 # _GNU_SOURCE for asprintf.
 CFLAGS += -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -D_GNU_SOURCE
 
+# EXTRA_CFLAGS can be set through make command line
+CFLAGS += $(EXTRA_CFLAGS)
+
 CFLAGS += $$(pkg-config --cflags libxml-2.0)
 
 CFLAGS += -g -O2 -std=gnu99 \
