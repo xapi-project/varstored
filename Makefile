@@ -50,7 +50,7 @@ CFLAGS   += -Wp,-MD,$(@D)/.$(@F).d -MT $(@D)/$(@F)
 SUBDIRS  = $(filter-out ./,$(dir $(OBJS) $(LIBS)))
 DEPS     = .*.d tools/.*.d
 
-LDFLAGS := -g 
+LDFLAGS := -g
 
 all: $(TARGET) tools
 
@@ -117,10 +117,10 @@ PK.auth: create-auth PK.pem PK.key
 	./create-auth -k PK.key -c PK.pem PK PK.auth PK.pem
 
 KEK.auth: create-auth PK.pem PK.key KEK.list
-	./create-auth -k PK.key -c PK.pem KEK KEK.auth $$(cat KEK.list)
+	cat KEK.list | xargs ./create-auth -k PK.key -c PK.pem KEK KEK.auth
 
 db.auth: create-auth PK.pem PK.key db.list
-	./create-auth -k PK.key -c PK.pem db db.auth $$(cat db.list)
+	cat db.list | xargs ./create-auth -k PK.key -c PK.pem db db.auth
 
 db.list:
 	echo certs/MicWinProPCA2011_2011-10-19.pem certs/MicCorUEFCA2011_2011-06-27.pem > $@
