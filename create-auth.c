@@ -225,7 +225,7 @@ create_descriptor(UINTN sig_len, EFI_TIME *timestamp, UINTN *descriptor_len)
 static void
 usage(const char *progname)
 {
-    printf("usage: %s [-k <key>] [-c cert] name output cert [cert...]\n",
+    printf("usage: %s [-k <key>] [-c cert] [-a] name output cert [cert...]\n",
            progname);
 }
 
@@ -252,7 +252,7 @@ int main(int argc, char **argv)
     ERR_clear_error();
 
     for (;;) {
-        int c = getopt(argc, argv, "c:k:h");
+        int c = getopt(argc, argv, "c:k:ha");
 
         if (c == -1)
             break;
@@ -283,6 +283,9 @@ int main(int argc, char **argv)
                 exit(1);
             }
             BIO_free_all(bio);
+            break;
+        case 'a':
+            attr |= EFI_VARIABLE_APPEND_WRITE;
             break;
         case 'h':
             usage(argv[0]);
