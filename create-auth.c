@@ -26,6 +26,7 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -229,6 +230,47 @@ usage(const char *progname)
            progname);
 }
 
+static X509 *
+read_cert(const char *path)
+{
+    BIO *bio;
+    X509 *cert;
+    const char *dot;
+    bool is_der = false;
+
+    /* Detect certificate file type by extension */
+    dot = strrchr(path, '.');
+    if (dot && !strcmp(dot, ".der"))
+        is_der = true;
+
+    bio = BIO_new_file(path, "r");
+    if (!bio)
+        return NULL;
+    if (is_der) {
+        cert = d2i_X509_bio(bio, NULL);
+        printf("Open DER %s %lu\n", path, ERR_get_error());
+    } else {
+        cert = PEM_read_bio_X509(bio, NULL, NULL, NULL);
+        printf("Open PEM %s %lu\n", path, ERR_get_error());
+    }
+    BIO_free_all(bio);
+    return cert;
+}
+
+static EVP_PKEY *
+read_private_key_pem(const char *path)
+{
+    BIO *bio;
+    EVP_PKEY *pkey;
+
+    bio = BIO_new_file(path, "r");
+    if (!bio)
+        return NULL;
+    pkey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
+    BIO_free_all(bio);
+    return pkey;
+}
+
 int main(int argc, char **argv)
 {
     X509 **cert;
@@ -240,7 +282,6 @@ int main(int argc, char **argv)
     UINT32 attr = ATTR_BRNV | EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS;
     EVP_PKEY *sign_key = NULL;
     X509 *sign_cert = NULL;
-    BIO *bio;
     FILE *out;
     time_t t;
     struct tm *tm;
@@ -259,30 +300,18 @@ int main(int argc, char **argv)
 
         switch (c) {
         case 'c':
-            bio = BIO_new_file(optarg, "r");
-            if (!bio) {
-                printf("Failed to open %s\n", optarg);
-                exit(1);
-            }
-            sign_cert = PEM_read_bio_X509(bio, NULL, NULL, NULL);
+            sign_cert = read_cert(optarg);
             if (!sign_cert) {
-                printf("Failed to parse %s\n", optarg);
+                printf("Failed to read certificate %s\n", optarg);
                 exit(1);
             }
-            BIO_free_all(bio);
             break;
         case 'k':
-            bio = BIO_new_file(optarg, "r");
-            if (!bio) {
-                printf("Failed to open %s\n", optarg);
-                exit(1);
-            }
-            sign_key = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
+            sign_key = read_private_key_pem(optarg);
             if (!sign_key) {
-                printf("Failed to parse %s\n", optarg);
+                printf("Failed to read private key %s\n", optarg);
                 exit(1);
             }
-            BIO_free_all(bio);
             break;
         case 'a':
             attr |= EFI_VARIABLE_APPEND_WRITE;
@@ -343,17 +372,11 @@ int main(int argc, char **argv)
     }
 
     for (i = optind; i < argc; i++) {
-        bio = BIO_new_file(argv[i], "r");
-        if (!bio) {
-            printf("Failed to open %s\n", argv[i]);
-            exit(1);
-        }
-        cert[i - optind] = PEM_read_bio_X509(bio, NULL, NULL, NULL);
+        cert[i - optind] = read_cert(argv[i]);
         if (!cert[i - optind]) {
-            printf("Failed to parse %s\n", argv[i]);
+            printf("Failed to read certificate %s\n", argv[i]);
             exit(1);
         }
-        BIO_free_all(bio);
     }
 
     /* Initialize timestamp to current time (in UTC). */
