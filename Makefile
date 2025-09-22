@@ -123,10 +123,13 @@ db.auth: create-auth PK.pem PK.key db.list
 	./create-auth -k PK.key -c PK.pem db db.auth $$(cat db.list)
 
 db.list:
-	echo certs/MicWinProPCA2011_2011-10-19.pem certs/MicCorUEFCA2011_2011-06-27.pem > $@
+	echo certs/MicWinProPCA2011_2011-10-19.pem \
+	     certs/MicCorUEFCA2011_2011-06-27.pem  \
+	     certs/windows-uefi-ca-2023.pem       \
+	     certs/ms-uefi-ca-2023.pem > $@
 
 KEK.list:
-	echo certs/MicCorKEKCA2011_2011-06-24.pem > $@
+	echo certs/MicCorKEKCA2011_2011-06-24.pem certs/ms-kek-ca-2023.pem > $@
 
 clean:
 	$(foreach dir,$(SUBDIRS),make -C $(dir) clean)
