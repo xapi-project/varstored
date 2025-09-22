@@ -60,10 +60,13 @@ LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
 ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
 
-Certificates in the certs directory are derived from edk2
-(https://github.com/tianocore/edk2) with the following license:
+Certificates in the certs directory are derived from
+https://github.com/microsoft/secureboot_objects with the following
+license:
 
-Copyright (C) 2014-2019, Red Hat, Inc.
+Secure Boot Objects
+
+Copyright (C) Microsoft Corporation. All rights reserved.
 
 SPDX-License-Identifier: BSD-2-Clause-Patent
 
