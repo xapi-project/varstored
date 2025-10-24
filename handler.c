@@ -1757,7 +1757,8 @@ do_set_variable(uint8_t *comm_buf)
                         }
                     }
 
-                    if (get_space_usage() + data_len > TOTAL_LIMIT) {
+                    if (l->data_len + data_len > DATA_LIMIT ||
+                            get_space_usage() + data_len > TOTAL_LIMIT) {
                         serialize_result(&ptr, EFI_OUT_OF_RESOURCES);
                         goto err;
                     }

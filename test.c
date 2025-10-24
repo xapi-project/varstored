@@ -1507,6 +1507,13 @@ static void test_set_variable_resource_limit(void)
     g_assert_cmpuint(status, ==, EFI_OUT_OF_RESOURCES);
 
     sv_ok(tname1, &tguid1, tmp, DATA_LIMIT, ATTR_B);
+
+    /* Cannot exceed DATA_LIMIT by appending */
+    call_set_variable(tname1, &tguid1, tmp, 1, ATTR_B | EFI_VARIABLE_APPEND_WRITE, 0);
+    ptr = buf;
+    status = unserialize_uintn(&ptr);
+    g_assert_cmpuint(status, ==, EFI_OUT_OF_RESOURCES);
+
     sv_ok(tname4, &tguid4, tmp, DATA_LIMIT, ATTR_B);
 
     /* Use all the remaining space */
