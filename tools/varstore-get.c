@@ -61,7 +61,6 @@ usage(const char *progname)
 static bool
 do_get(const char *guid_str, const char *name, bool show_attr)
 {
-    uint8_t buf[SHMEM_SIZE];
     uint8_t *ptr;
     uint8_t variable_name[NAME_LIMIT];
     EFI_GUID guid;
@@ -76,7 +75,7 @@ do_get(const char *guid_str, const char *name, bool show_attr)
         return false;
     }
 
-    ptr = buf;
+    ptr = cmd_buf;
     serialize_uint32(&ptr, 1); /* version */
     serialize_uint32(&ptr, COMMAND_GET_VARIABLE);
     serialize_data(&ptr, variable_name, name_size);
@@ -84,9 +83,9 @@ do_get(const char *guid_str, const char *name, bool show_attr)
     serialize_uintn(&ptr, DATA_LIMIT);
     *ptr = 0;
 
-    dispatch_command(buf);
+    dispatch_command(cmd_buf);
 
-    ptr = buf;
+    ptr = cmd_buf;
     status = unserialize_uintn(&ptr);
     if (status != EFI_SUCCESS) {
         print_efi_error(status);

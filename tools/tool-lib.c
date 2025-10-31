@@ -39,6 +39,8 @@
 
 #include "tool-lib.h"
 
+uint8_t *cmd_buf = NULL;
+
 /*
  * Prepare a command-line tool for running by initializing state and loading
  * the VM's variables from the backend.
@@ -50,6 +52,10 @@ tool_init(void)
 
     secure_boot_enable = false;
     auth_enforce = false;
+
+    cmd_buf = calloc(SHMEM_PAGES, PAGE_SIZE);
+    if (!cmd_buf)
+        return false;
 
     if (!db->check_args())
         return false;
@@ -292,7 +298,6 @@ print_depriv_options(void)
 bool
 do_rm(const EFI_GUID *guid, const char *name)
 {
-    uint8_t buf[SHMEM_SIZE];
     uint8_t *ptr;
     uint8_t variable_name[NAME_LIMIT];
     EFI_STATUS status;
@@ -301,7 +306,7 @@ do_rm(const EFI_GUID *guid, const char *name)
 
     name_size = parse_name(name, variable_name);
 
-    ptr = buf;
+    ptr = cmd_buf;
     serialize_uint32(&ptr, 1); /* version */
     serialize_uint32(&ptr, COMMAND_GET_VARIABLE);
     serialize_data(&ptr, variable_name, name_size);
@@ -309,9 +314,9 @@ do_rm(const EFI_GUID *guid, const char *name)
     serialize_uintn(&ptr, DATA_LIMIT);
     *ptr = 0;
 
-    dispatch_command(buf);
+    dispatch_command(cmd_buf);
 
-    ptr = buf;
+    ptr = cmd_buf;
     status = unserialize_uintn(&ptr);
     if (status != EFI_SUCCESS) {
         print_efi_error(status);
@@ -320,7 +325,7 @@ do_rm(const EFI_GUID *guid, const char *name)
 
     attr = unserialize_uint32(&ptr);
 
-    ptr = buf;
+    ptr = cmd_buf;
     serialize_uint32(&ptr, 1); /* version */
     serialize_uint32(&ptr, COMMAND_SET_VARIABLE);
     serialize_data(&ptr, variable_name, name_size);
@@ -340,9 +345,9 @@ do_rm(const EFI_GUID *guid, const char *name)
     serialize_uint32(&ptr, attr);
     *ptr = 0;
 
-    dispatch_command(buf);
+    dispatch_command(cmd_buf);
 
-    ptr = buf;
+    ptr = cmd_buf;
     status = unserialize_uintn(&ptr);
     if (status != EFI_SUCCESS) {
         print_efi_error(status);

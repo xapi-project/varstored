@@ -56,7 +56,6 @@
 
 #define PAGE_SIZE 4096
 #define SHMEM_PAGES 16
-#define SHMEM_SIZE (SHMEM_PAGES * PAGE_SIZE)
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof(x[0]))
 

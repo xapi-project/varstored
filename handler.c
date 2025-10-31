@@ -2152,7 +2152,8 @@ static bool
 set_variable_from_auth(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
                        const uint8_t *data, off_t data_len, bool append)
 {
-    uint8_t buf[SHMEM_SIZE];
+    bool ret = false;
+    uint8_t *cmd_buf = NULL;
     uint8_t *ptr;
     EFI_STATUS status;
     UINT32 attr = ATTR_BRNV_TIME;
@@ -2160,7 +2161,13 @@ set_variable_from_auth(const uint8_t *name, UINTN name_len, const EFI_GUID *guid
     if (append)
         attr |= EFI_VARIABLE_APPEND_WRITE;
 
-    ptr = buf;
+    cmd_buf = calloc(SHMEM_PAGES, PAGE_SIZE);
+    if (!cmd_buf) {
+        ERR("Failed to allocate command buffer\n");
+        goto out;
+    }
+
+    ptr = cmd_buf;
     serialize_uint32(&ptr, 1); /* version */
     serialize_uint32(&ptr, COMMAND_SET_VARIABLE);
     serialize_data(&ptr, name, name_len);
@@ -2168,16 +2175,20 @@ set_variable_from_auth(const uint8_t *name, UINTN name_len, const EFI_GUID *guid
     serialize_data(&ptr, data, data_len);
     serialize_uint32(&ptr, attr);
     *ptr = 0; /* at_runtime */
-    dispatch_command(buf);
+    dispatch_command(cmd_buf);
 
-    ptr = buf;
+    ptr = cmd_buf;
     status = unserialize_uintn(&ptr);
     if (status != EFI_SUCCESS) {
         ERR("Failed to execute auth data: 0x%lx\n", status);
-        return false;
+        goto out;
     }
 
-    return true;
+    ret = true;
+
+out:
+    free(cmd_buf);
+    return ret;
 }
 
 bool
