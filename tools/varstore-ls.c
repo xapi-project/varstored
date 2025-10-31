@@ -88,7 +88,8 @@ do_ls(void)
 
     for (;;) {
         ptr = cmd_buf;
-        serialize_uint32(&ptr, 1); /* version */
+        serialize_uint32(&ptr, 2); /* version */
+        serialize_uint32(&ptr, SHMEM_PAGES_V2_MAX); /* nr_pages */
         serialize_uint32(&ptr, COMMAND_GET_NEXT_VARIABLE);
         serialize_uintn(&ptr, NAME_LIMIT);
         serialize_data(&ptr, name, size);

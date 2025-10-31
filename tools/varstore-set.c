@@ -93,7 +93,7 @@ do_set(const char *guid_str, const char *name, const char *attr_str,
         ERR("Failed to open %s\n", path);
         return false;
     }
-    if (fstat(fileno(f), &st) == -1 || st.st_size > DATA_LIMIT_V1) {
+    if (fstat(fileno(f), &st) == -1 || st.st_size > DATA_LIMIT_V2) {
         printf("Invalid file size\n");
         fclose(f);
         return false;
@@ -113,7 +113,8 @@ do_set(const char *guid_str, const char *name, const char *attr_str,
     fclose(f);
 
     ptr = cmd_buf;
-    serialize_uint32(&ptr, 1); /* version */
+    serialize_uint32(&ptr, 2); /* version */
+    serialize_uint32(&ptr, SHMEM_PAGES_V2_MAX); /* nr_pages */
     serialize_uint32(&ptr, COMMAND_SET_VARIABLE);
     serialize_data(&ptr, variable_name, name_size);
     serialize_guid(&ptr, &guid);

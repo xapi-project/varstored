@@ -53,7 +53,7 @@ tool_init(void)
     secure_boot_enable = false;
     auth_enforce = false;
 
-    cmd_buf = calloc(SHMEM_PAGES_V1, PAGE_SIZE);
+    cmd_buf = calloc(SHMEM_PAGES_V2_MAX, PAGE_SIZE);
     if (!cmd_buf)
         return false;
 
@@ -307,11 +307,12 @@ do_rm(const EFI_GUID *guid, const char *name)
     name_size = parse_name(name, variable_name);
 
     ptr = cmd_buf;
-    serialize_uint32(&ptr, 1); /* version */
+    serialize_uint32(&ptr, 2); /* version */
+    serialize_uint32(&ptr, SHMEM_PAGES_V2_MAX); /* nr_pages */
     serialize_uint32(&ptr, COMMAND_GET_VARIABLE);
     serialize_data(&ptr, variable_name, name_size);
     serialize_guid(&ptr, guid);
-    serialize_uintn(&ptr, DATA_LIMIT_V1);
+    serialize_uintn(&ptr, DATA_LIMIT_V2);
     *ptr = 0;
 
     dispatch_command(cmd_buf);
@@ -326,7 +327,8 @@ do_rm(const EFI_GUID *guid, const char *name)
     attr = unserialize_uint32(&ptr);
 
     ptr = cmd_buf;
-    serialize_uint32(&ptr, 1); /* version */
+    serialize_uint32(&ptr, 2); /* version */
+    serialize_uint32(&ptr, SHMEM_PAGES_V2_MAX); /* nr_pages */
     serialize_uint32(&ptr, COMMAND_SET_VARIABLE);
     serialize_data(&ptr, variable_name, name_size);
     serialize_guid(&ptr, guid);

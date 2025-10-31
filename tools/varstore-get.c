@@ -76,11 +76,12 @@ do_get(const char *guid_str, const char *name, bool show_attr)
     }
 
     ptr = cmd_buf;
-    serialize_uint32(&ptr, 1); /* version */
+    serialize_uint32(&ptr, 2); /* version */
+    serialize_uint32(&ptr, SHMEM_PAGES_V2_MAX); /* nr_pages */
     serialize_uint32(&ptr, COMMAND_GET_VARIABLE);
     serialize_data(&ptr, variable_name, name_size);
     serialize_guid(&ptr, &guid);
-    serialize_uintn(&ptr, DATA_LIMIT_V1);
+    serialize_uintn(&ptr, DATA_LIMIT_V2);
     *ptr = 0;
 
     dispatch_command(cmd_buf);
@@ -109,13 +110,13 @@ do_get(const char *guid_str, const char *name, bool show_attr)
         uint8_t *data;
         UINTN data_len;
 
-        data = unserialize_data(&ptr, &data_len, DATA_LIMIT_V1);
+        data = unserialize_data(&ptr, &data_len, DATA_LIMIT_V2);
         if (!data) {
             if (data_len == 0) {
                 /* The variable is empty - nothing to write out. */
                 return true;
             } else {
-                ERR("Data too large: %lu > %u\n", data_len, DATA_LIMIT_V1);
+                ERR("Data too large: %lu > %u\n", data_len, DATA_LIMIT_V2);
                 return false;
             }
         }
