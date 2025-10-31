@@ -35,7 +35,15 @@
 #include "efi.h"
 
 #define NAME_LIMIT 4096 /* Maximum length of name */
-#define DATA_LIMIT 57344 /* Maximum length of a single variable */
+
+/* The following limits must respect the minimum prescribed by WHCP. */
+/*
+ * Maximum length of a single variable. To ensure that there's sufficient room
+ * for variables in the communication buffer, SHMEM_PAGES must be high enough to
+ * cover the data limit + 1 page (4096 bytes) for the variable name + 1 page for
+ * protocol overhead.
+ */
+#define DATA_LIMIT 57344
 #define TOTAL_LIMIT 131072 /* Maximum total storage */
 
 /*
