@@ -38,8 +38,19 @@ static char *save_name = "test.dat";
 
 const enum log_level log_level = LOG_LVL_ERROR;
 
+/* Multi-version */
+#define MULTI_TEST(test_name) \
+    static void test_name(UINT32 version); \
+    static void test_name ## _v1(void) { \
+        test_name(1); \
+    } \
+    static void test_name ## _v2(void) { \
+        test_name(2); \
+    } \
+    static void test_name(UINT32 version)
+
 /* The communication buffer. */
-static uint8_t buf[16 * 4096];
+static uint8_t buf[SHMEM_PAGES_V2_MAX * PAGE_SIZE];
 
 /* Wide char support */
 
@@ -348,11 +359,28 @@ static void reset_vars(void)
     var_list = NULL;
 }
 
-static void call_get_variable(const dstring *name, const EFI_GUID *guid,
-                              UINTN avail, BOOLEAN at_runtime)
+static void serialize_buf_version(uint8_t **ptr, UINT32 version)
+{
+    switch (version)
+    {
+    case 1:
+        serialize_uint32(ptr, 1);
+        break;
+    case 2:
+        serialize_uint32(ptr, 2);
+        serialize_uint32(ptr, SHMEM_PAGES_V2_MAX);
+        break;
+    default:
+        assert(0);
+    }
+}
+
+static void call_get_variable(UINT32 version, const dstring *name,
+                              const EFI_GUID *guid, UINTN avail,
+                              BOOLEAN at_runtime)
 {
     uint8_t *ptr = buf;
-    serialize_uint32(&ptr, 1);
+    serialize_buf_version(&ptr, version);
     serialize_uint32(&ptr, (UINT32)COMMAND_GET_VARIABLE);
     serialize_data(&ptr, (uint8_t *)name->data, dstring_data_size(name));
     serialize_guid(&ptr, guid);
@@ -362,7 +390,7 @@ static void call_get_variable(const dstring *name, const EFI_GUID *guid,
     dispatch_command(buf);
 }
 
-static EFI_STATUS call_get_variable_data(const dstring *name,
+static EFI_STATUS call_get_variable_data(UINT32 version, const dstring *name,
                                          const EFI_GUID *guid,
                                          UINTN avail, BOOLEAN at_runtime,
                                          uint8_t **data, UINTN *len)
@@ -370,7 +398,7 @@ static EFI_STATUS call_get_variable_data(const dstring *name,
     uint8_t *ptr = buf;
     EFI_STATUS status;
 
-    call_get_variable(name, guid, avail, at_runtime);
+    call_get_variable(version, name, guid, avail, at_runtime);
 
     status = unserialize_uintn(&ptr);
     unserialize_uint32(&ptr); /* attr */
@@ -378,24 +406,25 @@ static EFI_STATUS call_get_variable_data(const dstring *name,
     return status;
 }
 
-static void call_query_variable_info(void)
+static void call_query_variable_info(UINT32 version)
 {
     uint8_t *ptr = buf;
-    serialize_uint32(&ptr, 1);
+    serialize_buf_version(&ptr, version);
     serialize_uint32(&ptr, (UINT32)COMMAND_QUERY_VARIABLE_INFO);
     serialize_uint32(&ptr, 0);
 
     dispatch_command(buf);
 }
 
-static void call_get_next_variable(UINTN avail, const dstring *name,
-                                   const EFI_GUID *guid, BOOLEAN at_runtime)
+static void call_get_next_variable(UINT32 version, UINTN avail,
+                                   const dstring *name, const EFI_GUID *guid,
+                                   BOOLEAN at_runtime)
 {
     uint8_t *ptr = buf;
     size_t len = name ? dstring_data_size(name) : 0;
     const uint8_t *data = (uint8_t *)(name ? name->data : NULL);
 
-    serialize_uint32(&ptr, 1);
+    serialize_buf_version(&ptr, version);
     serialize_uint32(&ptr, (UINT32)COMMAND_GET_NEXT_VARIABLE);
     serialize_uintn(&ptr, avail);
     serialize_data(&ptr, data, len);
@@ -405,14 +434,14 @@ static void call_get_next_variable(UINTN avail, const dstring *name,
     dispatch_command(buf);
 }
 
-static void call_set_variable(const dstring *name, const EFI_GUID *guid,
-                              const uint8_t *data, UINTN data_len,
-                              UINT32 attr, BOOLEAN at_runtime)
+static void call_set_variable(UINT32 version, const dstring *name,
+                              const EFI_GUID *guid, const uint8_t *data,
+                              UINTN data_len, UINT32 attr, BOOLEAN at_runtime)
 {
     uint8_t *ptr = buf;
     size_t name_size = dstring_data_size(name);
 
-    serialize_uint32(&ptr, 1);
+    serialize_buf_version(&ptr, version);
     serialize_uint32(&ptr, (UINT32)COMMAND_SET_VARIABLE);
     serialize_data(&ptr, (uint8_t *)name->data, name_size);
     serialize_guid(&ptr, guid);
@@ -427,7 +456,7 @@ static void call_set_variable(const dstring *name, const EFI_GUID *guid,
  * This calls SetVariable and checks the result against expected. In the
  * failing case, the line number provided reported.
  */
-static EFI_STATUS setVariable_check_line(const dstring *name,
+static EFI_STATUS setVariable_check_line(UINT32 version, const dstring *name,
                                          const EFI_GUID *guid,
                                          const uint8_t *data, UINTN len,
                                          UINT32 attr, EFI_STATUS expected,
@@ -437,7 +466,7 @@ static EFI_STATUS setVariable_check_line(const dstring *name,
     EFI_STATUS status;
     char *nice_name;
 
-    call_set_variable(name, guid, data, len, attr, 0);
+    call_set_variable(version, name, guid, data, len, attr, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
 
@@ -449,12 +478,12 @@ static EFI_STATUS setVariable_check_line(const dstring *name,
     return status;
 }
 
-#define sv_check(_name, _guid, _data, _len, _attr, _expected) \
-    setVariable_check_line(_name, _guid, _data, _len, _attr, \
+#define sv_check(_version, _name, _guid, _data, _len, _attr, _expected) \
+    setVariable_check_line(_version, _name, _guid, _data, _len, _attr, \
                            _expected, __LINE__);
 
-#define sv_ok(_name, _guid, _data, _len, _attr) \
-    setVariable_check_line(_name, _guid, _data, _len, _attr, \
+#define sv_ok(_version, _name, _guid, _data, _len, _attr) \
+    setVariable_check_line(_version, _name, _guid, _data, _len, _attr, \
                            EFI_SUCCESS, __LINE__);
 
 /*
@@ -679,7 +708,7 @@ static size_t sign(uint8_t **signed_buf, const dstring *varname,
     return auth_size + data_size;
 }
 
-static void sign_and_check_(const dstring *varname, const EFI_GUID *vendor_guid,
+static void sign_and_check_(UINT32 version, const dstring *varname, const EFI_GUID *vendor_guid,
                             UINT32 attributes, const EFI_TIME *timestamp,
                             const uint8_t *data, size_t data_size,
                             const struct sign_details *sd, EFI_STATUS expected,
@@ -690,23 +719,24 @@ static void sign_and_check_(const dstring *varname, const EFI_GUID *vendor_guid,
 
     len = sign(&sign_buffer, varname, vendor_guid, attributes, timestamp,
                data, data_size, sd);
-    setVariable_check_line(varname, vendor_guid, sign_buffer, len,
+    setVariable_check_line(version, varname, vendor_guid, sign_buffer, len,
                            attributes, expected, line);
     free(sign_buffer);
 }
 
-#define sign_and_check(_name, _vend, _attr, _time, _data, _size, _sig, _e_d) \
-    sign_and_check_(_name, _vend, _attr, _time, _data, _size, _sig, _e_d, __LINE__)
+#define sign_and_check(_version, _name, _vend, _attr, _time, _data, _size, _sig, _e_d) \
+    sign_and_check_(_version, _name, _vend, _attr, _time, _data, _size, _sig, _e_d, __LINE__)
 
 /*
  * This function checks the variable's data is as expected.
  * The expected data is provided, such that it can be compared
  */
 
-#define check_variable_data(_name, _guid, _avai, _runtime, _expected, _len) \
-    check_variable_data_(_name, _guid, _avai, _runtime, _expected, _len, __LINE__)
+#define check_variable_data(_version, _name, _guid, _avai, _runtime, _expected, _len) \
+    check_variable_data_(_version, _name, _guid, _avai, _runtime, _expected, _len, __LINE__)
 
-static void check_variable_data_(const dstring *name, const EFI_GUID *guid,
+static void check_variable_data_(UINT32 version, const dstring *name,
+                                 const EFI_GUID *guid,
                                  UINTN avail, BOOLEAN at_runtime,
                                  const uint8_t *expected_data,
                                  UINTN expected_len, int line)
@@ -717,7 +747,8 @@ static void check_variable_data_(const dstring *name, const EFI_GUID *guid,
     UINTN len;
     char *nice_name = get_dstring_pretty(name);
 
-    status = call_get_variable_data(name, guid, avail, at_runtime, &ret_data, &len);
+    status = call_get_variable_data(version, name, guid, avail, at_runtime,
+                                    &ret_data, &len);
     vsd_assert_status("get_variable(\"%s\") at %d", status, ==, 0,
                        nice_name, line);
     vsd_assert_cmpuint("data length for \"%s\" at %d", expected_len, ==, len,
@@ -730,7 +761,7 @@ static void check_variable_data_(const dstring *name, const EFI_GUID *guid,
     free(nice_name);
 }
 
-static void test_get_variable_no_name(void)
+MULTI_TEST(test_get_variable_no_name)
 {
     uint8_t *ptr;
     EFI_STATUS status;
@@ -739,7 +770,7 @@ static void test_get_variable_no_name(void)
     reset_vars();
 
     /* An empty name should not be found. */
-    call_get_variable(empty, &nullguid, BSIZ, 0);
+    call_get_variable(version, empty, &nullguid, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
@@ -747,7 +778,7 @@ static void test_get_variable_no_name(void)
     free_dstring(empty);
 }
 
-static void test_get_variable_long_name(void)
+MULTI_TEST(test_get_variable_long_name)
 {
     uint8_t *ptr;
     EFI_STATUS status;
@@ -758,43 +789,43 @@ static void test_get_variable_long_name(void)
     memset(bigname->data, 42, dstring_data_size(bigname));
 
     /* Test the maximum variable name length. */
-    call_get_variable(bigname, &nullguid, BSIZ, 0);
+    call_get_variable(version, bigname, &nullguid, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_DEVICE_ERROR);
     free_dstring(bigname);
 }
 
-static void test_get_variable_not_found(void)
+MULTI_TEST(test_get_variable_not_found)
 {
     uint8_t *ptr;
     EFI_STATUS status;
 
     reset_vars();
-    sv_ok(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
-    sv_ok(tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_B);
-    sv_ok(tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_B);
+    sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
+    sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_B);
+    sv_ok(version, tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_B);
 
     /* Name is correct, guid is wrong */
-    call_get_variable(tname2, &tguid4, BSIZ, 0);
+    call_get_variable(version, tname2, &tguid4, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 
     /* Name is wrong, guid is correct */
-    call_get_variable(tname4, &tguid2, BSIZ, 0);
+    call_get_variable(version, tname4, &tguid2, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 
     /* Boot service only variable cannot be found at runtime */
-    call_get_variable(tname2, &tguid2, BSIZ, 1);
+    call_get_variable(version, tname2, &tguid2, BSIZ, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 }
 
-static void test_get_variable_found(void)
+MULTI_TEST(test_get_variable_found)
 {
     uint8_t *ptr;
     uint8_t *data;
@@ -803,12 +834,12 @@ static void test_get_variable_found(void)
     EFI_STATUS status;
 
     reset_vars();
-    sv_ok(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
-    sv_ok(tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_BR);
-    sv_ok(tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_B);
+    sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
+    sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_BR);
+    sv_ok(version, tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_B);
 
     /* Variable is correctly retrieved. */
-    call_get_variable(tname1, &tguid1, BSIZ, 0);
+    call_get_variable(version, tname1, &tguid1, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -820,7 +851,7 @@ static void test_get_variable_found(void)
     free(data);
 
     /* Runtime variable can be found at runtime */
-    call_get_variable(tname2, &tguid2, BSIZ, 1);
+    call_get_variable(version, tname2, &tguid2, BSIZ, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -832,7 +863,7 @@ static void test_get_variable_found(void)
     free(data);
 
     /* Variable is correctly retrieved. */
-    call_get_variable(tname3, &tguid3, BSIZ, 0);
+    call_get_variable(version, tname3, &tguid3, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -844,20 +875,20 @@ static void test_get_variable_found(void)
     free(data);
 }
 
-static void test_get_variable_too_small(void)
+MULTI_TEST(test_get_variable_too_small)
 {
     uint8_t *ptr;
     UINTN data_len;
     EFI_STATUS status;
 
     reset_vars();
-    sv_ok(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
+    sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
 
     /*
      * If the output buffer is too small, check that the correct size is
      * returned.
      */
-    call_get_variable(tname1, &tguid1, sizeof(tdata1) - 1, 0);
+    call_get_variable(version, tname1, &tguid1, sizeof(tdata1) - 1, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_BUFFER_TOO_SMALL);
@@ -865,7 +896,7 @@ static void test_get_variable_too_small(void)
     g_assert_cmpuint(data_len, ==, sizeof(tdata1));
 }
 
-static void test_query_variable_info(void)
+MULTI_TEST(test_query_variable_info)
 {
     uint8_t *ptr;
     EFI_STATUS status;
@@ -882,18 +913,18 @@ static void test_query_variable_info(void)
     memset(longname->data, 'a', dstring_data_size(longname));
 
     /* Check the defined limits with no variables. */
-    call_query_variable_info();
+    call_query_variable_info(version);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
     g_assert_cmpuint(TOTAL_LIMIT, ==, unserialize_uintn(&ptr));
     g_assert_cmpuint(TOTAL_LIMIT, ==, unserialize_uintn(&ptr));
-    g_assert_cmpuint(DATA_LIMIT, ==, unserialize_uintn(&ptr));
+    g_assert_cmpuint(data_limit(version), ==, unserialize_uintn(&ptr));
 
-    sv_ok(longname, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
+    sv_ok(version, longname, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
 
     /* Inserting a variable updates the limits correctly. */
-    call_query_variable_info();
+    call_query_variable_info(version);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -901,11 +932,11 @@ static void test_query_variable_info(void)
     g_assert_cmpuint(TOTAL_LIMIT - dstring_data_size(longname) -
                      sizeof(tdata1) - VARIABLE_SIZE_OVERHEAD,
                      ==, unserialize_uintn(&ptr));
-    g_assert_cmpuint(DATA_LIMIT, ==, unserialize_uintn(&ptr));
+    g_assert_cmpuint(data_limit(version), ==, unserialize_uintn(&ptr));
 
     /* Updating a variable updates the limits correctly. */
-    sv_ok(longname, &tguid1, tdata2, sizeof(tdata2), ATTR_B);
-    call_query_variable_info();
+    sv_ok(version, longname, &tguid1, tdata2, sizeof(tdata2), ATTR_B);
+    call_query_variable_info(version);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -913,12 +944,12 @@ static void test_query_variable_info(void)
     g_assert_cmpuint(TOTAL_LIMIT - dstring_data_size(longname) -
                      sizeof(tdata2) - VARIABLE_SIZE_OVERHEAD,
                      ==, unserialize_uintn(&ptr));
-    g_assert_cmpuint(DATA_LIMIT, ==, unserialize_uintn(&ptr));
+    g_assert_cmpuint(data_limit(version), ==, unserialize_uintn(&ptr));
 
     /* Appending to a variable updates the limits correctly. */
-    sv_ok(longname, &tguid1, tdata1, sizeof(tdata1),
+    sv_ok(version, longname, &tguid1, tdata1, sizeof(tdata1),
           ATTR_B | EFI_VARIABLE_APPEND_WRITE);
-    call_query_variable_info();
+    call_query_variable_info(version);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -926,21 +957,21 @@ static void test_query_variable_info(void)
     g_assert_cmpuint(TOTAL_LIMIT - dstring_data_size(longname) -
                      sizeof(tdata2) - sizeof(tdata1) - VARIABLE_SIZE_OVERHEAD,
                      ==, unserialize_uintn(&ptr));
-    g_assert_cmpuint(DATA_LIMIT, ==, unserialize_uintn(&ptr));
+    g_assert_cmpuint(data_limit(version), ==, unserialize_uintn(&ptr));
 
     /* Deleting a variable updates the limits correctly. */
-    sv_ok(longname, &tguid1, NULL, 0, ATTR_B);
-    call_query_variable_info();
+    sv_ok(version, longname, &tguid1, NULL, 0, ATTR_B);
+    call_query_variable_info(version);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
     g_assert_cmpuint(TOTAL_LIMIT, ==, unserialize_uintn(&ptr));
     g_assert_cmpuint(TOTAL_LIMIT, ==, unserialize_uintn(&ptr));
-    g_assert_cmpuint(DATA_LIMIT, ==, unserialize_uintn(&ptr));
+    g_assert_cmpuint(data_limit(version), ==, unserialize_uintn(&ptr));
     free_dstring(longname);
 }
 
-static void test_get_next_variable_empty(void)
+MULTI_TEST(test_get_next_variable_empty)
 {
     uint8_t *ptr;
     EFI_STATUS status;
@@ -948,13 +979,13 @@ static void test_get_next_variable_empty(void)
     reset_vars();
 
     /* No variables */
-    call_get_next_variable(BSIZ, NULL, &nullguid, 0);
+    call_get_next_variable(version, BSIZ, NULL, &nullguid, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 }
 
-static void test_get_next_variable_long_name(void)
+MULTI_TEST(test_get_next_variable_long_name)
 {
     uint8_t *ptr;
     EFI_STATUS status;
@@ -965,14 +996,14 @@ static void test_get_next_variable_long_name(void)
     memset(tmp_name->data, 42, dstring_data_size(tmp_name));
 
     /* Input name exceeds the limit */
-    call_get_next_variable(BSIZ, tmp_name, &nullguid, 0);
+    call_get_next_variable(version, BSIZ, tmp_name, &nullguid, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_DEVICE_ERROR);
     free_dstring(tmp_name);
 }
 
-static void test_get_next_variable_only_runtime(void)
+MULTI_TEST(test_get_next_variable_only_runtime)
 {
     uint8_t *ptr, *data;
     UINTN data_len;
@@ -985,13 +1016,13 @@ static void test_get_next_variable_only_runtime(void)
      */
 
     reset_vars();
-    sv_ok(tname5, &tguid5, tdata5, sizeof(tdata5), ATTR_B);
-    sv_ok(tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_BR);
-    sv_ok(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
-    sv_ok(tname4, &tguid4, tdata4, sizeof(tdata4), ATTR_BR);
-    sv_ok(tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_B);
+    sv_ok(version, tname5, &tguid5, tdata5, sizeof(tdata5), ATTR_B);
+    sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_BR);
+    sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
+    sv_ok(version, tname4, &tguid4, tdata4, sizeof(tdata4), ATTR_BR);
+    sv_ok(version, tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_B);
 
-    call_get_next_variable(BSIZ, NULL, &nullguid, 1);
+    call_get_next_variable(version, BSIZ, NULL, &nullguid, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1003,7 +1034,7 @@ static void test_get_next_variable_only_runtime(void)
     g_assert(!memcmp(&guid, &tguid4, GUID_LEN));
     free(data);
 
-    call_get_next_variable(BSIZ, tname4, &guid, 1);
+    call_get_next_variable(version, BSIZ, tname4, &guid, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1014,26 +1045,26 @@ static void test_get_next_variable_only_runtime(void)
     g_assert(!memcmp(&guid, &tguid2, GUID_LEN));
     free(data);
 
-    call_get_next_variable(BSIZ, tname2, &guid, 1);
+    call_get_next_variable(version, BSIZ, tname2, &guid, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 }
 
-static void test_get_next_variable_too_small(void)
+MULTI_TEST(test_get_next_variable_too_small)
 {
     uint8_t *ptr;
     UINTN data_len;
     EFI_STATUS status;
 
     reset_vars();
-    sv_ok(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
+    sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
 
     /*
      * If the output buffer is too small, check that the correct size is
      * returned.
      */
-    call_get_next_variable(0, NULL, &nullguid, 0);
+    call_get_next_variable(version, 0, NULL, &nullguid, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_BUFFER_TOO_SMALL);
@@ -1041,7 +1072,7 @@ static void test_get_next_variable_too_small(void)
     g_assert_cmpuint(data_len, ==, dstring_data_size(tname1) + sizeof(CHAR16));
 }
 
-static void test_get_next_variable_no_match(void)
+MULTI_TEST(test_get_next_variable_no_match)
 {
     uint8_t *ptr, *data;
     UINTN data_len;
@@ -1049,11 +1080,11 @@ static void test_get_next_variable_no_match(void)
     EFI_GUID guid;
 
     reset_vars();
-    sv_ok(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
-    sv_ok(tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_B);
+    sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
+    sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_B);
 
     /* First variable is retrieved successfully. */
-    call_get_next_variable(BSIZ, NULL, &nullguid, 0);
+    call_get_next_variable(version, BSIZ, NULL, &nullguid, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1064,13 +1095,13 @@ static void test_get_next_variable_no_match(void)
     g_assert(!memcmp(&guid, &tguid2, GUID_LEN));
 
     /* Check when an incorrect name is passed in. */
-    call_get_next_variable(BSIZ, tname4, &guid, 0);
+    call_get_next_variable(version, BSIZ, tname4, &guid, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
 
     /* Check when an incorrect guid is passed in. */
-    call_get_next_variable(BSIZ, tname2, &tguid4, 0);
+    call_get_next_variable(version, BSIZ, tname2, &tguid4, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
@@ -1078,7 +1109,7 @@ static void test_get_next_variable_no_match(void)
     free(data);
 }
 
-static void test_get_next_variable_all(void)
+MULTI_TEST(test_get_next_variable_all)
 {
     uint8_t *ptr, *data;
     UINTN data_len;
@@ -1091,13 +1122,13 @@ static void test_get_next_variable_all(void)
      */
 
     reset_vars();
-    sv_ok(tname5, &tguid5, tdata5, sizeof(tdata5), ATTR_B);
-    sv_ok(tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_BR);
-    sv_ok(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
-    sv_ok(tname4, &tguid4, tdata4, sizeof(tdata4), ATTR_BR);
-    sv_ok(tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_B);
+    sv_ok(version, tname5, &tguid5, tdata5, sizeof(tdata5), ATTR_B);
+    sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_BR);
+    sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
+    sv_ok(version, tname4, &tguid4, tdata4, sizeof(tdata4), ATTR_BR);
+    sv_ok(version, tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_B);
 
-    call_get_next_variable(BSIZ, NULL, &nullguid, 0);
+    call_get_next_variable(version, BSIZ, NULL, &nullguid, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1107,7 +1138,7 @@ static void test_get_next_variable_all(void)
     unserialize_guid(&ptr, &guid);
     g_assert(!memcmp(&guid, &tguid3, GUID_LEN));
 
-    call_get_next_variable(BSIZ, tname3, &guid, 0);
+    call_get_next_variable(version, BSIZ, tname3, &guid, 0);
     free(data);
     ptr = buf;
     status = unserialize_uintn(&ptr);
@@ -1119,7 +1150,7 @@ static void test_get_next_variable_all(void)
     g_assert(!memcmp(&guid, &tguid4, GUID_LEN));
     free(data);
 
-    call_get_next_variable(BSIZ, tname4, &guid, 0);
+    call_get_next_variable(version, BSIZ, tname4, &guid, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1129,7 +1160,7 @@ static void test_get_next_variable_all(void)
     unserialize_guid(&ptr, &guid);
     g_assert(!memcmp(&guid, &tguid1, GUID_LEN));
 
-    call_get_next_variable(BSIZ, tname1, &guid, 0);
+    call_get_next_variable(version, BSIZ, tname1, &guid, 0);
 
     free(data);
     ptr = buf;
@@ -1142,7 +1173,7 @@ static void test_get_next_variable_all(void)
     g_assert(!memcmp(&guid, &tguid2, GUID_LEN));
     free(data);
 
-    call_get_next_variable(BSIZ, tname2, &guid, 0);
+    call_get_next_variable(version, BSIZ, tname2, &guid, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1152,14 +1183,14 @@ static void test_get_next_variable_all(void)
     unserialize_guid(&ptr, &guid);
     g_assert(!memcmp(&guid, &tguid5, GUID_LEN));
 
-    call_get_next_variable(BSIZ, tname5, &guid, 0);
+    call_get_next_variable(version, BSIZ, tname5, &guid, 0);
     free(data);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 }
 
-static void test_set_variable_attr(void)
+MULTI_TEST(test_set_variable_attr)
 {
     uint8_t *ptr;
     EFI_STATUS status;
@@ -1168,39 +1199,39 @@ static void test_set_variable_attr(void)
     setup_variables();
 
     /* hardware error record is not supported */
-    call_set_variable(tname1, &tguid1, tdata1, sizeof(tdata1),
+    call_set_variable(version, tname1, &tguid1, tdata1, sizeof(tdata1),
                       ATTR_B | EFI_VARIABLE_HARDWARE_ERROR_RECORD, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
 
     /* authenticated write access is not supported */
-    call_set_variable(tname1, &tguid1, tdata1, sizeof(tdata1),
+    call_set_variable(version, tname1, &tguid1, tdata1, sizeof(tdata1),
                       ATTR_B | EFI_VARIABLE_AUTHENTICATED_WRITE_ACCESS, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_UNSUPPORTED);
 
     /* runtime without boottime access is invalid */
-    call_set_variable(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_R, 0);
+    call_set_variable(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_R, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
 
     /* Setting boottime variables at runtime is not supported */
-    call_set_variable(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B, 1);
+    call_set_variable(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
 
     /* Set a volatile variable at runtime fails */
-    call_set_variable(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_BR, 1);
+    call_set_variable(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_BR, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
 
     /* Set a variable at runtime without runtime access fails */
-    call_set_variable(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B, 1);
+    call_set_variable(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
@@ -1210,13 +1241,13 @@ static void test_set_variable_attr(void)
      * EFI_VARIABLE_ENHANCED_AUTHENTICATED_ACCESS attribute are set in a
      * SetVariable() call, then the firmware must return EFI_INVALID_PARAMETER.
      */
-     sign_and_check(tname2, &tguid1,
+     sign_and_check(version, tname2, &tguid1,
                     ATTR_B_TIME | EFI_VARIABLE_ENHANCED_AUTHENTICATED_ACCESS,
                     &test_timea, tdata1, sizeof(tdata1), &sign_testPK,
                     EFI_INVALID_PARAMETER);
 }
 
-static void test_set_variable_set(void)
+MULTI_TEST(test_set_variable_set)
 {
     uint8_t *ptr, *data;
     UINTN data_len;
@@ -1226,20 +1257,20 @@ static void test_set_variable_set(void)
     reset_vars();
 
     /* Basic SetVariable usage. */
-    sv_ok(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
-    sv_ok(tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_BR);
+    sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
+    sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_BR);
 
     /* Set an NV variable at runtime */
-    call_set_variable(tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_BRNV, 1);
+    call_set_variable(version, tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_BRNV, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
 
     /* Set an NV variable at boottime */
-    sv_ok(tname4, &tguid4, tdata4, sizeof(tdata4), ATTR_BNV);
+    sv_ok(version, tname4, &tguid4, tdata4, sizeof(tdata4), ATTR_BNV);
 
     /* Access boottime variable at boottime */
-    call_get_variable(tname1, &tguid1, BSIZ, 0);
+    call_get_variable(version, tname1, &tguid1, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1251,7 +1282,7 @@ static void test_set_variable_set(void)
     free(data);
 
     /* Access BR variable at boottime */
-    call_get_variable(tname2, &tguid2, BSIZ, 0);
+    call_get_variable(version, tname2, &tguid2, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1263,7 +1294,7 @@ static void test_set_variable_set(void)
     free(data);
 
     /* Access runtime variable at runtime */
-    call_get_variable(tname2, &tguid2, BSIZ, 1);
+    call_get_variable(version, tname2, &tguid2, BSIZ, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1275,7 +1306,7 @@ static void test_set_variable_set(void)
     free(data);
 
     /* Access runtime variable at runtime */
-    call_get_variable(tname3, &tguid3, BSIZ, 1);
+    call_get_variable(version, tname3, &tguid3, BSIZ, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1287,7 +1318,7 @@ static void test_set_variable_set(void)
     free(data);
 
     /* Access NV runtime variable at runtime */
-    call_get_variable(tname3, &tguid3, BSIZ, 1);
+    call_get_variable(version, tname3, &tguid3, BSIZ, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1299,7 +1330,7 @@ static void test_set_variable_set(void)
     free(data);
 
     /* Access NV boottime variable at boottime */
-    call_get_variable(tname4, &tguid4, BSIZ, 0);
+    call_get_variable(version, tname4, &tguid4, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1311,7 +1342,7 @@ static void test_set_variable_set(void)
     free(data);
 }
 
-static void test_set_variable_update(void)
+MULTI_TEST(test_set_variable_update)
 {
     uint8_t *ptr, *data;
     UINTN data_len;
@@ -1321,15 +1352,15 @@ static void test_set_variable_update(void)
     reset_vars();
 
     /* Insert a variable... */
-    sv_ok(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
+    sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
 
     /* ... and check it can be updated */
-    sv_ok(tname1, &tguid1, tdata2, sizeof(tdata2), ATTR_B);
-    sv_ok(tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_BR);
-    sv_ok(tname4, &tguid4, tdata4, sizeof(tdata4), ATTR_BNV);
+    sv_ok(version, tname1, &tguid1, tdata2, sizeof(tdata2), ATTR_B);
+    sv_ok(version, tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_BR);
+    sv_ok(version, tname4, &tguid4, tdata4, sizeof(tdata4), ATTR_BNV);
 
     /* Check the update worked. */
-    call_get_variable(tname1, &tguid1, BSIZ, 0);
+    call_get_variable(version, tname1, &tguid1, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1341,25 +1372,25 @@ static void test_set_variable_update(void)
     free(data);
 
     /* Cannot change attributes */
-    call_set_variable(tname1, &tguid1, tdata2, sizeof(tdata2), ATTR_BR, 0);
+    call_set_variable(version, tname1, &tguid1, tdata2, sizeof(tdata2), ATTR_BR, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
 
     /* Updating a volatile variable at runtime fails */
-    call_set_variable(tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_BR, 1);
+    call_set_variable(version, tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_BR, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_WRITE_PROTECTED);
 
     /* Updating a variable at runtime without runtime access fails */
-    call_set_variable(tname4, &tguid4, tdata4, sizeof(tdata4), ATTR_BNV, 1);
+    call_set_variable(version, tname4, &tguid4, tdata4, sizeof(tdata4), ATTR_BNV, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
 }
 
-static void test_set_variable_append(void)
+MULTI_TEST(test_set_variable_append)
 {
     uint8_t *ptr, *data;
     UINTN data_len;
@@ -1369,19 +1400,19 @@ static void test_set_variable_append(void)
     reset_vars();
 
     /* Insert some variables */
-    sv_ok(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
-    sv_ok(tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_BR);
-    sv_ok(tname4, &tguid4, tdata4, sizeof(tdata4), ATTR_BNV);
+    sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
+    sv_ok(version, tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_BR);
+    sv_ok(version, tname4, &tguid4, tdata4, sizeof(tdata4), ATTR_BNV);
 
     /* Append 0 bytes must not delete the variable */
-    sv_ok(tname1, &tguid1, NULL, 0, ATTR_B | EFI_VARIABLE_APPEND_WRITE);
+    sv_ok(version, tname1, &tguid1, NULL, 0, ATTR_B | EFI_VARIABLE_APPEND_WRITE);
 
     /* Append data to the variable */
-    sv_ok(tname1, &tguid1, tdata2, sizeof(tdata2),
+    sv_ok(version, tname1, &tguid1, tdata2, sizeof(tdata2),
           ATTR_B | EFI_VARIABLE_APPEND_WRITE);
 
     /* Verify the contents are a concatenation */
-    call_get_variable(tname1, &tguid1, BSIZ, 0);
+    call_get_variable(version, tname1, &tguid1, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1394,34 +1425,34 @@ static void test_set_variable_append(void)
     free(data);
 
     /* Appending to a volatile variable at runtime fails */
-    call_set_variable(tname3, &tguid3, tdata3, sizeof(tdata3),
+    call_set_variable(version, tname3, &tguid3, tdata3, sizeof(tdata3),
                       ATTR_BR | EFI_VARIABLE_APPEND_WRITE, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_WRITE_PROTECTED);
 
     /* Appending to a variable at runtime without runtime access fails */
-    call_set_variable(tname4, &tguid4, tdata4, sizeof(tdata4),
+    call_set_variable(version, tname4, &tguid4, tdata4, sizeof(tdata4),
                       ATTR_BNV | EFI_VARIABLE_APPEND_WRITE, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
 }
 
-static void test_set_variable_delete(void)
+MULTI_TEST(test_set_variable_delete)
 {
     uint8_t *ptr;
     EFI_STATUS status;
 
     reset_vars();
 
-    sv_ok(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
-    sv_ok(tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_B);
-    sv_ok(tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_BR);
-    sv_ok(tname5, &tguid5, tdata5, sizeof(tdata5), ATTR_BNV);
+    sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
+    sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_B);
+    sv_ok(version, tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_BR);
+    sv_ok(version, tname5, &tguid5, tdata5, sizeof(tdata5), ATTR_BNV);
 
     /* Deleting a non-existent variable at boottime fails (by setting no data) */
-    call_set_variable(tname4, &tguid4, NULL, 0, ATTR_B, 0);
+    call_set_variable(version, tname4, &tguid4, NULL, 0, ATTR_B, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
@@ -1430,13 +1461,13 @@ static void test_set_variable_delete(void)
      * Deleting a non-existent variable at boottime fails (by setting no
      * access attributes)
      */
-    call_set_variable(tname4, &tguid4, tdata4, sizeof(tdata4), 0, 0);
+    call_set_variable(version, tname4, &tguid4, tdata4, sizeof(tdata4), 0, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 
     /* Deleting a non-existent variable at runtime fails (by setting no data) */
-    call_set_variable(tname4, &tguid4, NULL, 0, ATTR_BRNV, 0);
+    call_set_variable(version, tname4, &tguid4, NULL, 0, ATTR_BRNV, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
@@ -1445,106 +1476,108 @@ static void test_set_variable_delete(void)
      * Deleting a non-existent variable at runtime fails (by setting no access
      * attributes)
      */
-    call_set_variable(tname4, &tguid4, tdata4, sizeof(tdata4), 0, 0);
+    call_set_variable(version, tname4, &tguid4, tdata4, sizeof(tdata4), 0, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 
     /* Delete by setting no data */
-    sv_ok(tname1, &tguid1, NULL, 0, ATTR_B);
+    sv_ok(version, tname1, &tguid1, NULL, 0, ATTR_B);
 
     /* Verify it is gone */
-    call_get_variable(tname1, &tguid1, BSIZ, 0);
+    call_get_variable(version, tname1, &tguid1, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 
     /* Delete by setting no access attributes */
-    sv_ok(tname2, &tguid2, tdata2, sizeof(tdata2), 0);
+    sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), 0);
 
     /* Verify it is gone */
-    call_get_variable(tname2, &tguid2, BSIZ, 0);
+    call_get_variable(version, tname2, &tguid2, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 
     /* Deleting a volatile variable at runtime fails */
-    call_set_variable(tname3, &tguid3, NULL, 0, ATTR_BR, 1);
+    call_set_variable(version, tname3, &tguid3, NULL, 0, ATTR_BR, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_WRITE_PROTECTED);
 
     /* Deleting a variable at runtime without runtime access fails */
-    call_set_variable(tname5, &tguid5, NULL, 0, ATTR_B, 1);
+    call_set_variable(version, tname5, &tguid5, NULL, 0, ATTR_B, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
 
     /* Deleting a variable at runtime by setting attributes to 0 succeeds */
-    sv_ok(tname5, &tguid5, NULL, 0, ATTR_BNV); /* Remove old variable */
+    sv_ok(version, tname5, &tguid5, NULL, 0, ATTR_BNV); /* Remove old variable */
     /* Insert it with different attr */
-    sv_ok(tname5, &tguid5, tdata5, sizeof(tdata5), ATTR_BRNV);
+    sv_ok(version, tname5, &tguid5, tdata5, sizeof(tdata5), ATTR_BRNV);
     /* Then delete it at runtime */
-    call_set_variable(tname5, &tguid5, tdata5, sizeof(tdata5), 0, 1);
+    call_set_variable(version, tname5, &tguid5, tdata5, sizeof(tdata5), 0, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
 }
 
-static void test_set_variable_resource_limit(void)
+MULTI_TEST(test_set_variable_resource_limit)
 {
     uint8_t *ptr;
     EFI_STATUS status;
-    UINTN remaining;
+    UINTN remaining = TOTAL_LIMIT;
     uint8_t tmp[TOTAL_LIMIT] = {0};
 
     reset_vars();
 
     /* Check per-variable limit */
-    call_set_variable(tname1, &tguid1, tmp, DATA_LIMIT + 1, ATTR_B, 0);
+    call_set_variable(version, tname1, &tguid1, tmp, data_limit(version) + 1, ATTR_B, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_OUT_OF_RESOURCES);
 
-    sv_ok(tname1, &tguid1, tmp, DATA_LIMIT, ATTR_B);
+    sv_ok(version, tname1, &tguid1, tmp, data_limit(version), ATTR_B);
 
     /* Cannot exceed DATA_LIMIT by appending */
-    call_set_variable(tname1, &tguid1, tmp, 1, ATTR_B | EFI_VARIABLE_APPEND_WRITE, 0);
+    call_set_variable(version, tname1, &tguid1, tmp, 1, ATTR_B | EFI_VARIABLE_APPEND_WRITE, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_OUT_OF_RESOURCES);
 
-    sv_ok(tname4, &tguid4, tmp, DATA_LIMIT, ATTR_B);
+    remaining -= data_limit(version) + dstring_data_size(tname1) + VARIABLE_SIZE_OVERHEAD;
+    if (version == 1) {
+        sv_ok(version, tname4, &tguid4, tmp, data_limit(version), ATTR_B);
+        remaining -= data_limit(version) + dstring_data_size(tname4) + VARIABLE_SIZE_OVERHEAD;
+    }
 
     /* Use all the remaining space */
-    remaining = TOTAL_LIMIT - 2 * DATA_LIMIT - dstring_data_size(tname1) -
-                dstring_data_size(tname4) -
-                dstring_data_size(tname2) - 3 * VARIABLE_SIZE_OVERHEAD;
-    sv_ok(tname2, &tguid2, tmp, remaining, ATTR_B);
+    remaining -= dstring_data_size(tname2) + VARIABLE_SIZE_OVERHEAD;
+    sv_ok(version, tname2, &tguid2, tmp, remaining, ATTR_B);
 
     /* Cannot use any more space with a new variable */
-    call_set_variable(tname3, &tguid3, tmp, 1, ATTR_B, 0);
+    call_set_variable(version, tname3, &tguid3, tmp, 1, ATTR_B, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_OUT_OF_RESOURCES);
 
     /* Cannot use any more by appending */
-    call_set_variable(tname1, &tguid1, tmp, 1, ATTR_B | EFI_VARIABLE_APPEND_WRITE, 0);
+    call_set_variable(version, tname1, &tguid1, tmp, 1, ATTR_B | EFI_VARIABLE_APPEND_WRITE, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_OUT_OF_RESOURCES);
 
     /* Cannot use any more by replacing */
-    call_set_variable(tname2, &tguid2, tmp, remaining + 1, ATTR_B, 0);
+    call_set_variable(version, tname2, &tguid2, tmp, remaining + 1, ATTR_B, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_OUT_OF_RESOURCES);
 
     /* Can update without exceeding the limit */
-    sv_ok(tname1, &tguid1, tmp, DATA_LIMIT, ATTR_B);
+    sv_ok(version, tname1, &tguid1, tmp, data_limit(version), ATTR_B);
 }
 
-static void test_set_variable_many_vars(void)
+MULTI_TEST(test_set_variable_many_vars)
 {
     uint8_t *ptr;
     EFI_STATUS status;
@@ -1560,7 +1593,7 @@ static void test_set_variable_many_vars(void)
     /* Set more variables than are allowed based on the variable "overhead". */
     for (i = 0; i < count + 1; i++) {
         sprintf(name, "%04d", i);
-        call_set_variable(dname, &tguid1, &tmp, 1, ATTR_B, 0);
+        call_set_variable(version, dname, &tguid1, &tmp, 1, ATTR_B, 0);
         ptr = buf;
         status = unserialize_uintn(&ptr);
         if (i == count)
@@ -1571,7 +1604,7 @@ static void test_set_variable_many_vars(void)
     free_dstring(dname);
 }
 
-static void test_set_variable_non_volatile(void)
+MULTI_TEST(test_set_variable_non_volatile)
 {
     uint8_t *ptr, *data;
     EFI_STATUS status;
@@ -1580,15 +1613,15 @@ static void test_set_variable_non_volatile(void)
 
     remove(save_name);
     reset_vars();
-    sv_ok(tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_BNV);
-    sv_ok(tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_B);
-    sv_ok(tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_BRNV);
-    sv_ok(tname4, &tguid4, tdata4, sizeof(tdata4), ATTR_BR);
+    sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_BNV);
+    sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_B);
+    sv_ok(version, tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_BRNV);
+    sv_ok(version, tname4, &tguid4, tdata4, sizeof(tdata4), ATTR_BR);
 
     reset_vars();
     db->init();
 
-    call_get_variable(tname1, &tguid1, BSIZ, 0);
+    call_get_variable(version, tname1, &tguid1, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1599,7 +1632,7 @@ static void test_set_variable_non_volatile(void)
     g_assert(!memcmp(tdata1, data, data_len));
     free(data);
 
-    call_get_variable(tname3, &tguid3, BSIZ, 0);
+    call_get_variable(version, tname3, &tguid3, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1610,23 +1643,23 @@ static void test_set_variable_non_volatile(void)
     g_assert(!memcmp(tdata3, data, data_len));
     free(data);
 
-    call_get_variable(tname2, &tguid2, BSIZ, 0);
+    call_get_variable(version, tname2, &tguid2, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 
-    call_get_variable(tname4, &tguid4, BSIZ, 0);
+    call_get_variable(version, tname4, &tguid4, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 
     /* Update, reload & check */
-    sv_ok(tname1, &tguid1, tdata2, sizeof(tdata2), ATTR_BNV);
+    sv_ok(version, tname1, &tguid1, tdata2, sizeof(tdata2), ATTR_BNV);
 
     reset_vars();
     db->init();
 
-    call_get_variable(tname1, &tguid1, BSIZ, 0);
+    call_get_variable(version, tname1, &tguid1, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1638,7 +1671,7 @@ static void test_set_variable_non_volatile(void)
     free(data);
 
     /* Append, reload & check */
-    call_set_variable(tname3, &tguid3, tdata4, sizeof(tdata4),
+    call_set_variable(version, tname3, &tguid3, tdata4, sizeof(tdata4),
                       ATTR_BRNV | EFI_VARIABLE_APPEND_WRITE, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
@@ -1647,7 +1680,7 @@ static void test_set_variable_non_volatile(void)
     reset_vars();
     db->init();
 
-    call_get_variable(tname3, &tguid3, BSIZ, 0);
+    call_get_variable(version, tname3, &tguid3, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1660,7 +1693,7 @@ static void test_set_variable_non_volatile(void)
     free(data);
 
     /* Delete, reload & check */
-    call_set_variable(tname3, &tguid3, NULL, 0, ATTR_BRNV, 1);
+    call_set_variable(version, tname3, &tguid3, NULL, 0, ATTR_BRNV, 1);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1668,13 +1701,13 @@ static void test_set_variable_non_volatile(void)
     reset_vars();
     db->init();
 
-    call_get_variable(tname3, &tguid3, BSIZ, 0);
+    call_get_variable(version, tname3, &tguid3, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
 }
 
-static void test_set_variable_special_vars(void)
+MULTI_TEST(test_set_variable_special_vars)
 {
     int i;
     dstring *vars[] = {auditMode_name, deployedMode_name, setupMode_name,
@@ -1693,16 +1726,16 @@ static void test_set_variable_special_vars(void)
 
         /* Check that special variables cannot be set/appended to. */
         for (j = 0; j < ARRAY_SIZE(attrs); j++) {
-            sv_check(vars[i], &gEfiGlobalVariableGuid,
+            sv_check(version, vars[i], &gEfiGlobalVariableGuid,
                      tdata1, sizeof(tdata1), attrs[j], EFI_WRITE_PROTECTED);
         }
 
         /* Check that special variables cannot be removed. */
-        sv_check(vars[i], &gEfiGlobalVariableGuid,
+        sv_check(version, vars[i], &gEfiGlobalVariableGuid,
                  NULL, 0, ATTR_BR, EFI_WRITE_PROTECTED);
 
         /* Check that special variables exist and their attr are correct. */
-        call_get_variable(vars[i], &gEfiGlobalVariableGuid, BSIZ, 0);
+        call_get_variable(version, vars[i], &gEfiGlobalVariableGuid, BSIZ, 0);
 
         status = unserialize_uintn(&ptr); /* status */
         g_assert_cmpuint(status, ==, EFI_SUCCESS);
@@ -1711,7 +1744,7 @@ static void test_set_variable_special_vars(void)
     }
 
     /* AuditMode must always be 0 in our implementation. */
-    check_variable_data(auditMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, auditMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
 
     /*
@@ -1722,7 +1755,7 @@ static void test_set_variable_special_vars(void)
      */
 }
 
-static void test_set_variable_mor(void)
+MULTI_TEST(test_set_variable_mor)
 {
     uint8_t data[] = {0, 0};
     uint8_t expected = 0;
@@ -1732,96 +1765,96 @@ static void test_set_variable_mor(void)
     setup_mor_variables();
 
     /* Check initial value of morControl is 0 */
-    check_variable_data(morControl_name, &morControlGuid, BSIZ, 0,
+    check_variable_data(version, morControl_name, &morControlGuid, BSIZ, 0,
                         &expected, 1);
 
     /* Storing more than 1 byte in morControl fails */
-    sv_check(morControl_name, &morControlGuid,
+    sv_check(version, morControl_name, &morControlGuid,
              data, 2, ATTR_BRNV, EFI_INVALID_PARAMETER);
 
     /* Deleting morControl fails */
-    sv_check(morControl_name, &morControlGuid,
+    sv_check(version, morControl_name, &morControlGuid,
              data, 0, ATTR_BRNV, EFI_INVALID_PARAMETER);
-    sv_check(morControl_name, &morControlGuid,
+    sv_check(version, morControl_name, &morControlGuid,
              data, 1, 0, EFI_INVALID_PARAMETER);
 
     /* Storing with invalid attributes in morControl fails */
-    sv_check(morControl_name, &morControlGuid,
+    sv_check(version, morControl_name, &morControlGuid,
              data, 1, ATTR_B, EFI_INVALID_PARAMETER);
-    sv_check(morControl_name, &morControlGuid,
+    sv_check(version, morControl_name, &morControlGuid,
              data, 1, ATTR_BRNV | EFI_VARIABLE_APPEND_WRITE, EFI_INVALID_PARAMETER);
 
     /* Setting reserved bits in morControl fails */
     data[0] = 0x2e;
-    sv_check(morControl_name, &morControlGuid,
+    sv_check(version, morControl_name, &morControlGuid,
              data, 1, ATTR_BRNV, EFI_INVALID_PARAMETER);
 
     /* Setting allowed bits in morControl works */
     data[0] = 0x11;
-    sv_ok(morControl_name, &morControlGuid,
+    sv_ok(version, morControl_name, &morControlGuid,
           data, 1, ATTR_BRNV);
 
     /* Check morControl is now set */
     expected = 0x11;
-    check_variable_data(morControl_name, &morControlGuid, BSIZ, 0,
+    check_variable_data(version, morControl_name, &morControlGuid, BSIZ, 0,
                         &expected, 1);
 
     /* Check morControlLock is 0 (unlocked) at startup */
     expected = 0;
-    check_variable_data(morControlLock_name, &morControlLockGuid, BSIZ, 0,
+    check_variable_data(version, morControlLock_name, &morControlLockGuid, BSIZ, 0,
                         &expected, 1);
 
     /* Storing something other than 1 or 8 bytes in morControlLock fails */
     data[0] = 0;
-    sv_check(morControlLock_name, &morControlLockGuid,
+    sv_check(version, morControlLock_name, &morControlLockGuid,
              data, 2, ATTR_BRNV, EFI_INVALID_PARAMETER);
 
     /* Deleting morControlLock fails */
-    sv_check(morControlLock_name, &morControlLockGuid,
+    sv_check(version, morControlLock_name, &morControlLockGuid,
              data, 0, ATTR_BRNV, EFI_WRITE_PROTECTED);
-    sv_check(morControlLock_name, &morControlLockGuid,
+    sv_check(version, morControlLock_name, &morControlLockGuid,
              data, 1, 0, EFI_WRITE_PROTECTED);
 
     /* Storing with invalid attributes in morControlLock fails */
-    sv_check(morControlLock_name, &morControlLockGuid,
+    sv_check(version, morControlLock_name, &morControlLockGuid,
              data, 1, ATTR_B, EFI_INVALID_PARAMETER);
-    sv_check(morControlLock_name, &morControlLockGuid,
+    sv_check(version, morControlLock_name, &morControlLockGuid,
              data, 1, ATTR_BRNV | EFI_VARIABLE_APPEND_WRITE, EFI_INVALID_PARAMETER);
 
     /* Unlock when already unlocked is a no-op */
-    sv_ok(morControlLock_name, &morControlLockGuid,
+    sv_ok(version, morControlLock_name, &morControlLockGuid,
           data, 1, ATTR_BRNV);
 
     /* Storing an invalid value in morControlLock fails */
     data[0] = 2;
-    sv_check(morControlLock_name, &morControlLockGuid,
+    sv_check(version, morControlLock_name, &morControlLockGuid,
              data, 1, ATTR_BRNV, EFI_INVALID_PARAMETER);
 
     /* Locking without a key succeeds */
     data[0] = 1;
-    sv_ok(morControlLock_name, &morControlLockGuid,
+    sv_ok(version, morControlLock_name, &morControlLockGuid,
           data, 1, ATTR_BRNV);
 
     /* morControlLock is now 1 (locked) */
     expected = 1;
-    check_variable_data(morControlLock_name, &morControlLockGuid, BSIZ, 0,
+    check_variable_data(version, morControlLock_name, &morControlLockGuid, BSIZ, 0,
                         &expected, 1);
 
     /* Setting morControl when locked fails */
-    sv_check(morControl_name, &morControlGuid,
+    sv_check(version, morControl_name, &morControlGuid,
              data, 1, ATTR_BRNV, EFI_WRITE_PROTECTED);
 
     /* Locking when already locked fails */
-    sv_check(morControlLock_name, &morControlLockGuid,
+    sv_check(version, morControlLock_name, &morControlLockGuid,
              data, 1, ATTR_BRNV, EFI_ACCESS_DENIED);
 
     /* Unlocking when locked without a key fails */
     data[0] = 0;
-    sv_check(morControlLock_name, &morControlLockGuid,
+    sv_check(version, morControlLock_name, &morControlLockGuid,
              data, 1, ATTR_BRNV, EFI_ACCESS_DENIED);
 }
 
-static void test_set_variable_mor_key(void)
+MULTI_TEST(test_set_variable_mor_key)
 {
     uint8_t data[] = {1, 2, 3, 4, 5, 6, 7, 8};
     uint8_t mor_control_data = 1;
@@ -1833,70 +1866,70 @@ static void test_set_variable_mor_key(void)
 
     /* morControlLock is initialized to 0 (unlocked) */
     expected = 0;
-    check_variable_data(morControlLock_name, &morControlLockGuid, BSIZ, 0,
+    check_variable_data(version, morControlLock_name, &morControlLockGuid, BSIZ, 0,
                         &expected, 1);
 
     /* Setting morControl when unlocked succeeds */
-    sv_ok(morControl_name, &morControlGuid,
+    sv_ok(version, morControl_name, &morControlGuid,
           &mor_control_data, 1, ATTR_BRNV);
 
     /* Locking with a key succeeds */
-    sv_ok(morControlLock_name, &morControlLockGuid,
+    sv_ok(version, morControlLock_name, &morControlLockGuid,
           data, 8, ATTR_BRNV);
 
     /* morControlLock is now 2 (locked with key) */
     expected = 2;
-    check_variable_data(morControlLock_name, &morControlLockGuid, BSIZ, 0,
+    check_variable_data(version, morControlLock_name, &morControlLockGuid, BSIZ, 0,
                         &expected, 1);
 
     /* Setting morControl when locked fails */
-    sv_check(morControl_name, &morControlGuid,
+    sv_check(version, morControl_name, &morControlGuid,
              &mor_control_data, 1, ATTR_BRNV, EFI_WRITE_PROTECTED);
 
     /* Unlocking with the correct key works */
-    sv_ok(morControlLock_name, &morControlLockGuid,
+    sv_ok(version, morControlLock_name, &morControlLockGuid,
           data, 8, ATTR_BRNV);
 
     /* morControlLock is now 0 (unlocked) */
     expected = 0;
-    check_variable_data(morControlLock_name, &morControlLockGuid, BSIZ, 0,
+    check_variable_data(version, morControlLock_name, &morControlLockGuid, BSIZ, 0,
                         &expected, 1);
 
     /* Setting morControl when unlocked succeeds again */
     mor_control_data = 0;
-    sv_ok(morControl_name, &morControlGuid,
+    sv_ok(version, morControl_name, &morControlGuid,
           &mor_control_data, 1, ATTR_BRNV);
 
     /* Relock it */
-    sv_ok(morControlLock_name, &morControlLockGuid,
+    sv_ok(version, morControlLock_name, &morControlLockGuid,
           data, 8, ATTR_BRNV);
 
     /* Unlocking with an incorrect key fails */
     data[0] = 0;
-    sv_check(morControlLock_name, &morControlLockGuid,
+    sv_check(version, morControlLock_name, &morControlLockGuid,
              data, 8, ATTR_BRNV, EFI_ACCESS_DENIED);
 
     /* morControlLock is now 1 (locked without key) */
     expected = 1;
-    check_variable_data(morControlLock_name, &morControlLockGuid, BSIZ, 0,
+    check_variable_data(version, morControlLock_name, &morControlLockGuid, BSIZ, 0,
                         &expected, 1);
 
     /* Unlocking when locked without key fails */
     data[0] = 1;
-    sv_check(morControlLock_name, &morControlLockGuid,
+    sv_check(version, morControlLock_name, &morControlLockGuid,
              data, 8, ATTR_BRNV, EFI_ACCESS_DENIED);
 }
 
-static void set_usermode(void)
+static void set_usermode(UINT32 version)
 {
     /* Move into user mode by enrolling Platform Key. */
 
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                    &test_timea, (uint8_t *)certPK, certPK_len,
                    &sign_testPK, EFI_SUCCESS);
 }
 
-static void test_use_bad_digest(void)
+MULTI_TEST(test_use_bad_digest)
 {
     /*
      * Attempt bad digest
@@ -1909,11 +1942,11 @@ static void test_use_bad_digest(void)
     reset_vars();
     setup_variables();
 
-    sign_and_check(tname1, &tguid1, ATTR_B_TIME, &test_timea, tdata1,
+    sign_and_check(version, tname1, &tguid1, ATTR_B_TIME, &test_timea, tdata1,
                    sizeof(tdata1), &sign_bad_digest, EFI_SECURITY_VIOLATION);
 }
 
-static void test_set_secure_variable(void)
+static void test_set_secure_variable(UINT32 version)
 {
     const char tosign_data[] = "testdata";
     const char tosign2_data[] = "|appended";
@@ -1925,25 +1958,25 @@ static void test_set_secure_variable(void)
     int len;
 
     /* 1. Create a EFI_VARIABLE_AUTHENTICATION_2 variable */
-    sign_and_check(tname1, &tguid1, ATTR_B_TIME, &test_timea,
+    sign_and_check(version, tname1, &tguid1, ATTR_B_TIME, &test_timea,
                    (uint8_t *)tosign_data, strlen((char *)tosign_data),
                    &sign_testPK, EFI_SUCCESS);
-    check_variable_data(tname1, &tguid1, BSIZ, 0,
+    check_variable_data(version, tname1, &tguid1, BSIZ, 0,
                         (uint8_t *)tosign_data, strlen(tosign_data));
 
     /* 2. try append */
-    sign_and_check(tname1, &tguid1, ATTR_B_TIME | EFI_VARIABLE_APPEND_WRITE,
+    sign_and_check(version, tname1, &tguid1, ATTR_B_TIME | EFI_VARIABLE_APPEND_WRITE,
                    &test_timeb, (uint8_t *)tosign2_data, strlen(tosign2_data),
                    &sign_testPK, EFI_SUCCESS);
-    check_variable_data(tname1, &tguid1, BSIZ, 0,
+    check_variable_data(version, tname1, &tguid1, BSIZ, 0,
                         (uint8_t *)tosign_appended_data,
                         strlen(tosign_appended_data));
 
     /* 3. Try append with older time stamp (is meant to work!) */
-    sign_and_check(tname1, &tguid1, ATTR_B_TIME | EFI_VARIABLE_APPEND_WRITE,
+    sign_and_check(version, tname1, &tguid1, ATTR_B_TIME | EFI_VARIABLE_APPEND_WRITE,
                    &test_timea, (uint8_t *)tosign3_data, strlen(tosign3_data),
                    &sign_testPK, EFI_SUCCESS);
-    check_variable_data(tname1, &tguid1, BSIZ, 0,
+    check_variable_data(version, tname1, &tguid1, BSIZ, 0,
                         (uint8_t *)tosign_appended2_data,
                         strlen(tosign_appended2_data));
 
@@ -1951,10 +1984,10 @@ static void test_set_secure_variable(void)
      * Try updating, at time b. This shouldn't work. (appends with bad times,
      * don't update the time
      */
-    sign_and_check(tname1, &tguid1, ATTR_B_TIME, &test_timeb,
+    sign_and_check(version, tname1, &tguid1, ATTR_B_TIME, &test_timeb,
                    (uint8_t *)tosign3_data, strlen(tosign3_data),
                    &sign_testPK, EFI_SECURITY_VIOLATION);
-    check_variable_data(tname1, &tguid1, BSIZ, 0,
+    check_variable_data(version, tname1, &tguid1, BSIZ, 0,
                         (uint8_t *)tosign_appended2_data,
                         strlen(tosign_appended2_data));
 
@@ -1968,22 +2001,22 @@ static void test_set_secure_variable(void)
                ATTR_B_TIME, &test_timec, (uint8_t *)tosign2_data,
                strlen(tosign2_data), &sign_testPK);
     assert(len);
-    sv_check(tname1, &tguid1, sign_buffer, len, ATTR_B_TIME |
+    sv_check(version, tname1, &tguid1, sign_buffer, len, ATTR_B_TIME |
              EFI_VARIABLE_APPEND_WRITE, EFI_SECURITY_VIOLATION);
     free(sign_buffer);
 
     /* check it's the same */
-    check_variable_data(tname1, &tguid1, BSIZ, 0,
+    check_variable_data(version, tname1, &tguid1, BSIZ, 0,
                         (uint8_t *)tosign_appended2_data,
                         strlen(tosign_appended2_data));
 
     /* 4. Try updating with wrong key */
-    sign_and_check(tname1, &tguid1, ATTR_B_TIME, &test_timec,
+    sign_and_check(version, tname1, &tguid1, ATTR_B_TIME, &test_timec,
                    (uint8_t *)tosign2_data, strlen(tosign2_data),
                    &sign_certB, EFI_SECURITY_VIOLATION);
 
     /* check it's the same */
-    check_variable_data(tname1, &tguid1, BSIZ, 0,
+    check_variable_data(version, tname1, &tguid1, BSIZ, 0,
                         (uint8_t *)tosign_appended2_data,
                         strlen(tosign_appended2_data));
 
@@ -1991,21 +2024,21 @@ static void test_set_secure_variable(void)
      * Check authenticated variables cannot be deleted by unsetting attriubtes
      * (2.7A page 248)
      */
-    sign_and_check(tname1, &tguid1, 0, &test_timec,
+    sign_and_check(version, tname1, &tguid1, 0, &test_timec,
                    NULL, 0,
                    &sign_testPK, EFI_INVALID_PARAMETER);
 
     /* Check variable is the same */
-    check_variable_data(tname1, &tguid1, BSIZ, 0,
+    check_variable_data(version, tname1, &tguid1, BSIZ, 0,
                         (uint8_t *)tosign_appended2_data,
                          strlen(tosign_appended2_data));
 
     /* try deleting */
-    sign_and_check(tname1, &tguid1, ATTR_B_TIME, &test_timec, NULL, 0,
+    sign_and_check(version, tname1, &tguid1, ATTR_B_TIME, &test_timec, NULL, 0,
                    &sign_testPK, EFI_SUCCESS);
 }
 
-static void test_secure_set_variable_setupmode(void)
+MULTI_TEST(test_secure_set_variable_setupmode)
 {
     reset_vars();
     setup_variables();
@@ -2016,35 +2049,35 @@ static void test_secure_set_variable_setupmode(void)
      * operating in setup mode.
      */
 
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
-    test_set_secure_variable();
+    test_set_secure_variable(version);
 }
 
-static void test_secure_set_variable_usermode(void)
+MULTI_TEST(test_secure_set_variable_usermode)
 {
     reset_vars();
     setup_variables();
 
     /* Check we're in setup mode */
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
 
-    set_usermode();
+    set_usermode(version);
 
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
 
-    test_set_secure_variable();
+    test_set_secure_variable(version);
 }
 
-static void test_secure_set_PK(void)
+MULTI_TEST(test_secure_set_PK)
 {
     EFI_SIGNATURE_LIST *joint_cert;
     size_t joint_len;
@@ -2054,77 +2087,77 @@ static void test_secure_set_PK(void)
     reset_vars();
     setup_variables();
 
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
-    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
 
     /* try cert, signed by someone unknown. Should be no mode change. */
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                    &test_timea, (uint8_t *)certPK, certPK_len,
                    &sign_certB, EFI_SECURITY_VIOLATION);
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
-    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
 
     /* try setting PK, with wrong attributes */
 
-    sv_check(PK_name, &gEfiGlobalVariableGuid, (uint8_t *)certPK, certPK_len,
+    sv_check(version, PK_name, &gEfiGlobalVariableGuid, (uint8_t *)certPK, certPK_len,
              ATTR_BRNV, EFI_INVALID_PARAMETER);
 
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid,
+    sign_and_check(version, PK_name, &gEfiGlobalVariableGuid,
                    EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS,
                    &test_timea, (uint8_t *)certPK, certPK_len,
                    &sign_certB, EFI_NOT_FOUND);
 
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid,
+    sign_and_check(version, PK_name, &gEfiGlobalVariableGuid,
                    ATTR_B_TIME | EFI_VARIABLE_RUNTIME_ACCESS,
                    &test_timea, (uint8_t *)certPK, certPK_len,
                    &sign_certB, EFI_INVALID_PARAMETER);
 
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid,
+    sign_and_check(version, PK_name, &gEfiGlobalVariableGuid,
                    ATTR_B_TIME | EFI_VARIABLE_NON_VOLATILE,
                    &test_timea, (uint8_t *)certPK, certPK_len,
                    &sign_certB, EFI_INVALID_PARAMETER);
 
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid,
+    sign_and_check(version, PK_name, &gEfiGlobalVariableGuid,
                    EFI_VARIABLE_RUNTIME_ACCESS | EFI_VARIABLE_NON_VOLATILE |
                    EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS,
                    &test_timea, (uint8_t *)certPK, certPK_len,
                    &sign_certB, EFI_INVALID_PARAMETER);
 
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
-    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
 
     /* Set PK, self signed - should move to user mode */
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                    &test_timea, (uint8_t *)certPK, certPK_len,
                    &sign_testPK, EFI_SUCCESS);
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
-    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
 
     /* new cert, signed by self */
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                    &test_timeb, (uint8_t *)certB, certB_len,
                    &sign_certB, EFI_SECURITY_VIOLATION);
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
-    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
 
     /*
@@ -2136,40 +2169,40 @@ static void test_secure_set_PK(void)
         uint8_t *buf = calloc(i, 1);
         assert(buf);
 
-        sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+        sign_and_check(version, PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                        &test_timeb, buf, i,
                        &sign_testPK, EFI_INVALID_PARAMETER);
-        check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+        check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid,
                             BSIZ, 0, (uint8_t *)"\0", 1);
-        check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+        check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid,
                             BSIZ, 0, (uint8_t *)"\1", 1);
-        check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+        check_variable_data(version, secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                             (uint8_t *)"\1", 1);
 
         memcpy(buf, certB, i);
 
-        sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+        sign_and_check(version, PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                        &test_timeb, buf, i,
                        &sign_testPK, EFI_INVALID_PARAMETER);
-        check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+        check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid,
                             BSIZ, 0, (uint8_t *)"\0", 1);
-        check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+        check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid,
                             BSIZ, 0, (uint8_t *)"\1", 1);
-        check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+        check_variable_data(version, secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                             (uint8_t *)"\1", 1);
 
         free(buf);
     }
 
     /* Try appending a second cert  - should not work */
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid,
+    sign_and_check(version, PK_name, &gEfiGlobalVariableGuid,
                    ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE,
                    &test_timeb, (uint8_t *)certB, certB_len,
                    &sign_testPK, EFI_INVALID_PARAMETER);
 
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
 
     /* Try setting two keys in one write, two lists */
@@ -2181,7 +2214,7 @@ static void test_secure_set_PK(void)
     memcpy(ptr, certB, certB_len);
     joint_len = certPK_len + certB_len;
 
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                    &test_timeb, (uint8_t *)joint_cert, joint_len,
                    &sign_testPK, EFI_INVALID_PARAMETER);
 
@@ -2191,7 +2224,7 @@ static void test_secure_set_PK(void)
     char *cert_list[] = {"testPK.pem", "testcertB.pem", NULL};
     read_x509_list_into_CertList(cert_list, &joint_cert, &joint_len);
 
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid,
+    sign_and_check(version, PK_name, &gEfiGlobalVariableGuid,
                    ATTR_BRNV_TIME,
                    &test_timeb, (uint8_t *)joint_cert, joint_len,
                    &sign_testPK, EFI_INVALID_PARAMETER);
@@ -2199,40 +2232,40 @@ static void test_secure_set_PK(void)
     free(joint_cert);
 
     /* new cert, signed by previous */
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                    &test_timeb, (uint8_t *)certB, certB_len,
                    &sign_testPK, EFI_SUCCESS);
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
-    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
 
     /* delete it, with first (should fail) */
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                    &test_timec, NULL, 0, &sign_testPK, EFI_SECURITY_VIOLATION);
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
-    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
 
     /* delete it, with second */
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                    &test_timec, NULL, 0, &sign_certB, EFI_SUCCESS);
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\1", 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, (uint8_t *)"\0", 1);
-    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
-    sign_and_check(PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, PK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                    &test_timeb, NULL, 0, &sign_testPK, EFI_NOT_FOUND);
 }
 
-static void sig_db_check(const dstring *key_db, const EFI_GUID *guid,
+static void sig_db_check(UINT32 version, const dstring *key_db, const EFI_GUID *guid,
                          EFI_TIME *time, bool setup)
 {
     uint8_t *ptr, *data, *data_ptr;
@@ -2245,32 +2278,32 @@ static void sig_db_check(const dstring *key_db, const EFI_GUID *guid,
     uint8_t *securemode = setup ? (uint8_t *)"\0" : (uint8_t *)"\1";
 
     /* Check SetupMode and SecureBoot vars are as expected */
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, setupmode, 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, deployedmode, 1);
-    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         securemode, 1);
 
-    sv_check(key_db, guid, (uint8_t *)certA, certA_len,
+    sv_check(version, key_db, guid, (uint8_t *)certA, certA_len,
              ATTR_BRNV, EFI_INVALID_PARAMETER);
 
-    sign_and_check(key_db, guid,
+    sign_and_check(version, key_db, guid,
                    EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS,
                    time, (uint8_t *)certA, certA_len,
                    &sign_certB, EFI_NOT_FOUND);
 
-    sign_and_check(key_db, guid,
+    sign_and_check(version, key_db, guid,
                    ATTR_B_TIME | EFI_VARIABLE_RUNTIME_ACCESS,
                    time, (uint8_t *)certA, certA_len,
                    &sign_certB, EFI_INVALID_PARAMETER);
 
-    sign_and_check(key_db, guid,
+    sign_and_check(version, key_db, guid,
                    ATTR_B_TIME | EFI_VARIABLE_NON_VOLATILE,
                    time, (uint8_t *)certA, certA_len,
                    &sign_certB, EFI_INVALID_PARAMETER);
 
-    sign_and_check(key_db, guid,
+    sign_and_check(version, key_db, guid,
                    EFI_VARIABLE_RUNTIME_ACCESS | EFI_VARIABLE_NON_VOLATILE |
                    EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS,
                    time, (uint8_t *)certA, certA_len,
@@ -2285,13 +2318,13 @@ static void sig_db_check(const dstring *key_db, const EFI_GUID *guid,
         uint8_t *buf = calloc(i, 1);
         assert(buf);
 
-        sign_and_check(key_db, guid, ATTR_BRNV_TIME,
+        sign_and_check(version, key_db, guid, ATTR_BRNV_TIME,
                        time, buf, i,
                        &sign_testPK, EFI_INVALID_PARAMETER);
 
         memcpy(buf, certA, i);
 
-        sign_and_check(key_db, guid, ATTR_BRNV_TIME,
+        sign_and_check(version, key_db, guid, ATTR_BRNV_TIME,
                        time, buf, i,
                        &sign_testPK, EFI_INVALID_PARAMETER);
 
@@ -2299,56 +2332,56 @@ static void sig_db_check(const dstring *key_db, const EFI_GUID *guid,
     }
 
     /* try a valid signed cert, but not signed by PK */
-    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time, (uint8_t *)certB, certB_len,
+    sign_and_check(version, key_db, guid, ATTR_BRNV_TIME, time, (uint8_t *)certB, certB_len,
                    &sign_certB, setup ? EFI_SUCCESS : EFI_SECURITY_VIOLATION);
 
     if (setup) {
         time->Second++;
-        check_variable_data(key_db, guid, BSIZ, 0, (uint8_t *)certB, certB_len);
+        check_variable_data(version, key_db, guid, BSIZ, 0, (uint8_t *)certB, certB_len);
     }
 
     /* try a cert, signed by someone unknown. */
-    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time, (uint8_t *)certA, certA_len,
+    sign_and_check(version, key_db, guid, ATTR_BRNV_TIME, time, (uint8_t *)certA, certA_len,
                    &sign_certB, setup ? EFI_SUCCESS : EFI_SECURITY_VIOLATION);
 
     if (setup) {
         time->Second++;
-        check_variable_data(key_db, guid, BSIZ, 0, (uint8_t *)certA, certA_len);
+        check_variable_data(version, key_db, guid, BSIZ, 0, (uint8_t *)certA, certA_len);
     }
 
     /* SetupMode and SecureBoot vars should not have changed */
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, setupmode, 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, deployedmode, 1);
-    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         securemode, 1);
 
     if (!setup) {
         /* try a valid cert */
-        sign_and_check(key_db, guid, ATTR_BRNV_TIME, time,
+        sign_and_check(version, key_db, guid, ATTR_BRNV_TIME, time,
                        (uint8_t *)certA, certA_len, &sign_testPK, EFI_SUCCESS);
 
         time->Second++;
-        check_variable_data(key_db, guid, BSIZ, 0, (uint8_t *)certA, certA_len);
+        check_variable_data(version, key_db, guid, BSIZ, 0, (uint8_t *)certA, certA_len);
     }
 
     /* SetupMode and SecureBoot vars should not have changed */
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, setupmode, 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid,
                         BSIZ, 0, deployedmode, 1);
-    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         securemode, 1);
 
     /* Try appending another */
-    sign_and_check(key_db, guid,
+    sign_and_check(version, key_db, guid,
                    ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE, time,
                    (uint8_t *)certB, certB_len, &sign_certB,
                    setup ? EFI_SUCCESS : EFI_SECURITY_VIOLATION);
 
     if (!setup)
-        sign_and_check(key_db, guid,
+        sign_and_check(version, key_db, guid,
                        ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE,
                        time, (uint8_t *)certB, certB_len,
                        &sign_testPK, EFI_SUCCESS);
@@ -2356,7 +2389,7 @@ static void sig_db_check(const dstring *key_db, const EFI_GUID *guid,
     time->Second++;
 
     /* Check it */
-    call_get_variable(key_db, guid, certA_len + certB_len, 0);
+    call_get_variable(version, key_db, guid, certA_len + certB_len, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     vsd_assert_status("status", status, ==, EFI_SUCCESS);
@@ -2368,21 +2401,21 @@ static void sig_db_check(const dstring *key_db, const EFI_GUID *guid,
     assert_cmpmem(data_ptr, data_len - certA_len, certB, certB_len);
 
     /* Delete */
-    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time, NULL, 0, &sign_certB,
+    sign_and_check(version, key_db, guid, ATTR_BRNV_TIME, time, NULL, 0, &sign_certB,
                    setup ? EFI_SUCCESS : EFI_SECURITY_VIOLATION);
 
     if (!setup)
-        sign_and_check(key_db, guid, ATTR_BRNV_TIME, time, NULL, 0,
+        sign_and_check(version, key_db, guid, ATTR_BRNV_TIME, time, NULL, 0,
                        &sign_testPK, EFI_SUCCESS);
 
     /* Try deleting again */
-    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time, NULL, 0,
+    sign_and_check(version, key_db, guid, ATTR_BRNV_TIME, time, NULL, 0,
                    &sign_testPK, EFI_NOT_FOUND);
 
     free(data);
 }
 
-static void sig_db_check_multi(const dstring *key_db, const EFI_GUID *guid,
+static void sig_db_check_multi(UINT32 version, const dstring *key_db, const EFI_GUID *guid,
                                EFI_TIME *time)
 {
     EFI_SIGNATURE_LIST *combined_cert;
@@ -2400,7 +2433,7 @@ static void sig_db_check_multi(const dstring *key_db, const EFI_GUID *guid,
     temp = *first_data;
     *first_data = -1;
 
-    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time,
+    sign_and_check(version, key_db, guid, ATTR_BRNV_TIME, time,
                    (uint8_t *)combined_cert, combined_len,
                    &sign_testPK, EFI_INVALID_PARAMETER);
 
@@ -2412,18 +2445,18 @@ static void sig_db_check_multi(const dstring *key_db, const EFI_GUID *guid,
     temp = *second_data;
     *second_data = -1;
 
-    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time,
+    sign_and_check(version, key_db, guid, ATTR_BRNV_TIME, time,
                    (uint8_t *)combined_cert, combined_len,
                    &sign_testPK, EFI_INVALID_PARAMETER);
     *second_data = temp;
 
-    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time,
+    sign_and_check(version, key_db, guid, ATTR_BRNV_TIME, time,
                   (uint8_t *)combined_cert, combined_len,
                   &sign_testPK, EFI_SUCCESS);
     free(combined_cert);
 }
 
-static void test_secure_set_KEK_setupmode(void)
+MULTI_TEST(test_secure_set_KEK_setupmode)
 {
     uint8_t *ptr, *data, *data_ptr;
     EFI_STATUS status;
@@ -2434,27 +2467,27 @@ static void test_secure_set_KEK_setupmode(void)
     reset_vars();
     setup_variables();
 
-    sig_db_check(KEK_name, &gEfiGlobalVariableGuid, &test_time, true);
+    sig_db_check(version, KEK_name, &gEfiGlobalVariableGuid, &test_time, true);
 
     /* new cert, signed by self */
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, KEK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                    &test_time, (uint8_t *)certB, certB_len,
                    &sign_certB, EFI_SUCCESS);
     test_time.Second++;
 
-    call_get_variable(KEK_name, &gEfiGlobalVariableGuid, BSIZ, 0);
+    call_get_variable(version, KEK_name, &gEfiGlobalVariableGuid, BSIZ, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
 
     /* Try appending a second cert */
 
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
+    sign_and_check(version, KEK_name, &gEfiGlobalVariableGuid,
                    ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE, &test_time,
                    (uint8_t *)certA, certA_len, &sign_testPK, EFI_SUCCESS);
     test_time.Second++;
 
-    call_get_variable(KEK_name, &gEfiGlobalVariableGuid, certA_len + certB_len, 0);
+    call_get_variable(version, KEK_name, &gEfiGlobalVariableGuid, certA_len + certB_len, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     vsd_assert_status("status", status, ==, EFI_SUCCESS);
@@ -2468,16 +2501,16 @@ static void test_secure_set_KEK_setupmode(void)
     free(data);
 }
 
-static void test_secure_set_KEK_usermode(void)
+MULTI_TEST(test_secure_set_KEK_usermode)
 {
     EFI_TIME test_time = {2018, 6, 20, 13, 38, 0, 0, 0, 0, 0, 0};
 
     reset_vars();
     setup_variables();
-    set_usermode();
+    set_usermode(version);
 
-    sig_db_check(KEK_name, &gEfiGlobalVariableGuid, &test_time, false);
-    sig_db_check_multi(KEK_name, &gEfiGlobalVariableGuid, &test_time);
+    sig_db_check(version, KEK_name, &gEfiGlobalVariableGuid, &test_time, false);
+    sig_db_check_multi(version, KEK_name, &gEfiGlobalVariableGuid, &test_time);
 }
 
 /*
@@ -2486,7 +2519,7 @@ static void test_secure_set_KEK_usermode(void)
  * perform an append of EFI_SIGNATURE_DATA values that are already part of
  * the existing variable value.
  */
-static void test_duplicate_db(const dstring *key_db, const EFI_GUID *guid,
+static void test_duplicate_db(UINT32 version, const dstring *key_db, const EFI_GUID *guid,
                               EFI_TIME *time, bool setup)
 {
     uint8_t *ptr, *data, *data_ptr;
@@ -2494,21 +2527,21 @@ static void test_duplicate_db(const dstring *key_db, const EFI_GUID *guid,
     UINTN data_len;
     UINT32 attr;
 
-    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time,
+    sign_and_check(version, key_db, guid, ATTR_BRNV_TIME, time,
                    (uint8_t *)certA, certA_len, &sign_testPK, EFI_SUCCESS);
 
     time->Second++;
 
-    sign_and_check(key_db, guid, ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE,
+    sign_and_check(version, key_db, guid, ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE,
                    time, (uint8_t *)certB, certB_len, &sign_testPK, EFI_SUCCESS);
 
     time->Second++;
 
-    sign_and_check(key_db, guid, ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE,
+    sign_and_check(version, key_db, guid, ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE,
                    time, (uint8_t *)certA, certA_len, &sign_testPK, EFI_SUCCESS);
 
     /* Check DB - should be two items */
-    call_get_variable(key_db, guid, certA_len * 2 + certB_len, 0);
+    call_get_variable(version, key_db, guid, certA_len * 2 + certB_len, 0);
     ptr = buf;
     status = unserialize_uintn(&ptr);
     vsd_assert_status("status", status, ==, EFI_SUCCESS);
@@ -2520,50 +2553,50 @@ static void test_duplicate_db(const dstring *key_db, const EFI_GUID *guid,
     assert_cmpmem(data_ptr, data_len - certA_len, certB, certB_len);
 
     /* Check timestamp was updated */
-    sign_and_check(key_db, guid, ATTR_BRNV_TIME, time, NULL, 0,
+    sign_and_check(version, key_db, guid, ATTR_BRNV_TIME, time, NULL, 0,
                    &sign_testPK, setup ? EFI_SUCCESS : EFI_SECURITY_VIOLATION);
 
     time->Second++;
     if (!setup)
-        sign_and_check(key_db, guid, ATTR_BRNV_TIME, time, NULL, 0,
+        sign_and_check(version, key_db, guid, ATTR_BRNV_TIME, time, NULL, 0,
                        &sign_testPK, EFI_SUCCESS);
 
     free(data);
 }
 
-static void test_secure_set_db__setupmode(const dstring *key_db)
+static void test_secure_set_db__setupmode(UINT32 version, const dstring *key_db)
 {
     EFI_TIME test_time = {2018, 6, 20, 13, 38, 0, 0, 0, 0, 0, 0};
 
     reset_vars();
     setup_variables();
 
-    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\1", 1);
-    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+    check_variable_data(version, deployedMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
                         (uint8_t *)"\0", 1);
 
-    sig_db_check(key_db, &gEfiImageSecurityDatabaseGuid, &test_time, true);
+    sig_db_check(version, key_db, &gEfiImageSecurityDatabaseGuid, &test_time, true);
 
-    test_duplicate_db(key_db, &gEfiImageSecurityDatabaseGuid, &test_time, true);
+    test_duplicate_db(version, key_db, &gEfiImageSecurityDatabaseGuid, &test_time, true);
 }
 
-static void test_secure_set_db_setupmode(void)
+MULTI_TEST(test_secure_set_db_setupmode)
 {
-    test_secure_set_db__setupmode(db_name);
+    test_secure_set_db__setupmode(version, db_name);
 }
 
-static void test_secure_set_dbx_setupmode(void)
+MULTI_TEST(test_secure_set_dbx_setupmode)
 {
-    test_secure_set_db__setupmode(dbx_name);
+    test_secure_set_db__setupmode(version, dbx_name);
 }
 
-static void test_secure_set_dbt_setupmode(void)
+MULTI_TEST(test_secure_set_dbt_setupmode)
 {
-    test_secure_set_db__setupmode(dbt_name);
+    test_secure_set_db__setupmode(version, dbt_name);
 }
 
-static void test_secure_set_db__usermode(const dstring *key_db)
+static void test_secure_set_db__usermode(UINT32 version, const dstring *key_db)
 {
     EFI_TIME test_time = {2018, 6, 20, 13, 38, 0, 0, 0, 0, 0, 0};
     EFI_SIGNATURE_LIST *combined_cert;
@@ -2572,40 +2605,40 @@ static void test_secure_set_db__usermode(const dstring *key_db)
 
     reset_vars();
     setup_variables();
-    set_usermode();
+    set_usermode(version);
 
-    sig_db_check(key_db, &gEfiImageSecurityDatabaseGuid, &test_time, false);
-    sig_db_check_multi(key_db, &gEfiImageSecurityDatabaseGuid, &test_time);
+    sig_db_check(version, key_db, &gEfiImageSecurityDatabaseGuid, &test_time, false);
+    sig_db_check_multi(version, key_db, &gEfiImageSecurityDatabaseGuid, &test_time);
 
     test_time.Second++;
     /*
      * Previous checked PK owner can add db key
      * Now check a KEK key can be used.
      */
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, KEK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                    &test_time, (uint8_t *)certB, certB_len,
                    &sign_testPK, EFI_SUCCESS);
-    sign_and_check(key_db, &gEfiImageSecurityDatabaseGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, key_db, &gEfiImageSecurityDatabaseGuid, ATTR_BRNV_TIME,
                    &test_time, (uint8_t *)certA, certA_len,
                    &sign_certB, EFI_SUCCESS);
 
     test_time.Second++;
 
     /* Try it as KEK second key (two lists) */
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, KEK_name, &gEfiGlobalVariableGuid, ATTR_BRNV_TIME,
                    &test_time, (uint8_t *)certPK, certPK_len,
                    &sign_testPK, EFI_SUCCESS);
 
-    sign_and_check(key_db, &gEfiImageSecurityDatabaseGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, key_db, &gEfiImageSecurityDatabaseGuid, ATTR_BRNV_TIME,
                    &test_time, (uint8_t *)certA, certA_len,
                    &sign_certB, EFI_SECURITY_VIOLATION);
 
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
+    sign_and_check(version, KEK_name, &gEfiGlobalVariableGuid,
                    ATTR_BRNV_TIME | EFI_VARIABLE_APPEND_WRITE, &test_time,
                    (uint8_t *)certB, certB_len,
                    &sign_testPK, EFI_SUCCESS);
 
-    sign_and_check(key_db, &gEfiImageSecurityDatabaseGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, key_db, &gEfiImageSecurityDatabaseGuid, ATTR_BRNV_TIME,
                    &test_time, (uint8_t *)certA, certA_len,
                    &sign_certB, EFI_SUCCESS);
 
@@ -2613,34 +2646,40 @@ static void test_secure_set_db__usermode(const dstring *key_db)
 
     /* Try it as KEK second key (one list) */
     read_x509_list_into_CertList(cert_list, &combined_cert, &combined_len);
-    sign_and_check(KEK_name, &gEfiGlobalVariableGuid,
+    sign_and_check(version, KEK_name, &gEfiGlobalVariableGuid,
                    ATTR_BRNV_TIME,
                    &test_time, (uint8_t *)combined_cert, combined_len,
                    &sign_testPK, EFI_SUCCESS);
 
-    sign_and_check(key_db, &gEfiImageSecurityDatabaseGuid, ATTR_BRNV_TIME,
+    sign_and_check(version, key_db, &gEfiImageSecurityDatabaseGuid, ATTR_BRNV_TIME,
                    &test_time, (uint8_t *)certA, certA_len,
                    &sign_certB, EFI_SUCCESS);
     test_time.Second++;
 
-    test_duplicate_db(key_db, &gEfiImageSecurityDatabaseGuid, &test_time, false);
+    test_duplicate_db(version, key_db, &gEfiImageSecurityDatabaseGuid, &test_time, false);
     free(combined_cert);
 }
 
-static void test_secure_set_db_usermode(void)
+MULTI_TEST(test_secure_set_db_usermode)
 {
-    test_secure_set_db__usermode(db_name);
+    test_secure_set_db__usermode(version, db_name);
 }
 
-static void test_secure_set_dbx_usermode(void)
+MULTI_TEST(test_secure_set_dbx_usermode)
 {
-    test_secure_set_db__usermode(dbx_name);
+    test_secure_set_db__usermode(version, dbx_name);
 }
 
-static void test_secure_set_dbt_usermode(void)
+MULTI_TEST(test_secure_set_dbt_usermode)
 {
-    test_secure_set_db__usermode(dbt_name);
+    test_secure_set_db__usermode(version, dbt_name);
 }
+
+#define ADD_MULTI_TEST(test_name, test_func) \
+    do { \
+        g_test_add_func(test_name "_v1", test_func ## _v1); \
+        g_test_add_func(test_name "_v2", test_func ## _v2); \
+    } while (0);
 
 int main(int argc, char **argv)
 {
@@ -2651,79 +2690,79 @@ int main(int argc, char **argv)
 
     g_test_init(&argc, &argv, NULL);
 
-    g_test_add_func("/test/get_variable/no_name",
-                    test_get_variable_no_name);
-    g_test_add_func("/test/get_variable/long_name",
-                    test_get_variable_long_name);
-    g_test_add_func("/test/get_variable/not_found",
-                    test_get_variable_not_found);
-    g_test_add_func("/test/get_variable/found",
-                    test_get_variable_found);
-    g_test_add_func("/test/get_variable/too_small",
-                    test_get_variable_too_small);
-    g_test_add_func("/test/query_variable_info",
-                    test_query_variable_info);
-    g_test_add_func("/test/get_next_variable/empty",
-                    test_get_next_variable_empty);
-    g_test_add_func("/test/get_next_variable/long_name",
-                    test_get_next_variable_long_name);
-    g_test_add_func("/test/get_next_variable/only_runtime",
-                    test_get_next_variable_only_runtime);
-    g_test_add_func("/test/get_next_variable/too_small",
-                    test_get_next_variable_too_small);
-    g_test_add_func("/test/get_next_variable/no_match",
-                    test_get_next_variable_no_match);
-    g_test_add_func("/test/get_next_variable/all",
-                    test_get_next_variable_all);
-    g_test_add_func("/test/set_variable/attr",
-                    test_set_variable_attr);
-    g_test_add_func("/test/set_variable/set",
-                    test_set_variable_set);
-    g_test_add_func("/test/set_variable/update",
-                    test_set_variable_update);
-    g_test_add_func("/test/set_variable/append",
-                    test_set_variable_append);
-    g_test_add_func("/test/set_variable/delete",
-                    test_set_variable_delete);
-    g_test_add_func("/test/set_variable/resource_limit",
-                    test_set_variable_resource_limit);
-    g_test_add_func("/test/set_variable/many_vars",
-                    test_set_variable_many_vars);
-    g_test_add_func("/test/set_variable/non_volatile",
-                    test_set_variable_non_volatile);
-    g_test_add_func("/test/set_variable/special_vars",
-                    test_set_variable_special_vars);
-    g_test_add_func("/test/set_variable/mor",
-                    test_set_variable_mor);
-    g_test_add_func("/test/set_variable/mor_key",
-                    test_set_variable_mor_key);
+    ADD_MULTI_TEST("/test/get_variable/no_name",
+                   test_get_variable_no_name);
+    ADD_MULTI_TEST("/test/get_variable/long_name",
+                   test_get_variable_long_name);
+    ADD_MULTI_TEST("/test/get_variable/not_found",
+                   test_get_variable_not_found);
+    ADD_MULTI_TEST("/test/get_variable/found",
+                   test_get_variable_found);
+    ADD_MULTI_TEST("/test/get_variable/too_small",
+                   test_get_variable_too_small);
+    ADD_MULTI_TEST("/test/query_variable_info",
+                   test_query_variable_info);
+    ADD_MULTI_TEST("/test/get_next_variable/empty",
+                   test_get_next_variable_empty);
+    ADD_MULTI_TEST("/test/get_next_variable/long_name",
+                   test_get_next_variable_long_name);
+    ADD_MULTI_TEST("/test/get_next_variable/only_runtime",
+                   test_get_next_variable_only_runtime);
+    ADD_MULTI_TEST("/test/get_next_variable/too_small",
+                   test_get_next_variable_too_small);
+    ADD_MULTI_TEST("/test/get_next_variable/no_match",
+                   test_get_next_variable_no_match);
+    ADD_MULTI_TEST("/test/get_next_variable/all",
+                   test_get_next_variable_all);
+    ADD_MULTI_TEST("/test/set_variable/attr",
+                   test_set_variable_attr);
+    ADD_MULTI_TEST("/test/set_variable/set",
+                   test_set_variable_set);
+    ADD_MULTI_TEST("/test/set_variable/update",
+                   test_set_variable_update);
+    ADD_MULTI_TEST("/test/set_variable/append",
+                   test_set_variable_append);
+    ADD_MULTI_TEST("/test/set_variable/delete",
+                   test_set_variable_delete);
+    ADD_MULTI_TEST("/test/set_variable/resource_limit",
+                   test_set_variable_resource_limit);
+    ADD_MULTI_TEST("/test/set_variable/many_vars",
+                   test_set_variable_many_vars);
+    ADD_MULTI_TEST("/test/set_variable/non_volatile",
+                   test_set_variable_non_volatile);
+    ADD_MULTI_TEST("/test/set_variable/special_vars",
+                   test_set_variable_special_vars);
+    ADD_MULTI_TEST("/test/set_variable/mor",
+                   test_set_variable_mor);
+    ADD_MULTI_TEST("/test/set_variable/mor_key",
+                   test_set_variable_mor_key);
 
-    g_test_add_func("/test/secure_set_variable/use_bad_digest",
-                    test_use_bad_digest);
-    g_test_add_func("/test/secure_set_variable/setupmode",
-                    test_secure_set_variable_setupmode);
-    g_test_add_func("/test/secure_set_variable/PK",
-                    test_secure_set_PK);
-    g_test_add_func("/test/secure_set_variable/usermode",
-                    test_secure_set_variable_usermode);
-    g_test_add_func("/test/secure_set_variable/KEK/setupmode",
-                    test_secure_set_KEK_setupmode);
-    g_test_add_func("/test/secure_set_variable/KEK/usermode",
-                    test_secure_set_KEK_usermode);
+    ADD_MULTI_TEST("/test/secure_set_variable/use_bad_digest",
+                   test_use_bad_digest);
+    ADD_MULTI_TEST("/test/secure_set_variable/setupmode",
+                   test_secure_set_variable_setupmode);
+    ADD_MULTI_TEST("/test/secure_set_variable/PK",
+                   test_secure_set_PK);
+    ADD_MULTI_TEST("/test/secure_set_variable/usermode",
+                   test_secure_set_variable_usermode);
+    ADD_MULTI_TEST("/test/secure_set_variable/KEK/setupmode",
+                   test_secure_set_KEK_setupmode);
+    ADD_MULTI_TEST("/test/secure_set_variable/KEK/usermode",
+                   test_secure_set_KEK_usermode);
 
-    g_test_add_func("/test/secure_set_variable/DB/setupmode",
-                    test_secure_set_db_setupmode);
-    g_test_add_func("/test/secure_set_variable/DBX/setupmode",
-                    test_secure_set_dbx_setupmode);
-    g_test_add_func("/test/secure_set_variable/DBT/setupmode",
-                    test_secure_set_dbt_setupmode);
+    ADD_MULTI_TEST("/test/secure_set_variable/DB/setupmode",
+                   test_secure_set_db_setupmode);
+    ADD_MULTI_TEST("/test/secure_set_variable/DBX/setupmode",
+                   test_secure_set_dbx_setupmode);
+    ADD_MULTI_TEST("/test/secure_set_variable/DBT/setupmode",
+                   test_secure_set_dbt_setupmode);
 
-    g_test_add_func("/test/secure_set_variable/DB/usermode",
-                    test_secure_set_db_usermode);
-    g_test_add_func("/test/secure_set_variable/DBX/usermode",
-                    test_secure_set_dbx_usermode);
-    g_test_add_func("/test/secure_set_variable/DBT/usermode",
-                    test_secure_set_dbt_usermode);
+    ADD_MULTI_TEST("/test/secure_set_variable/DB/usermode",
+                   test_secure_set_db_usermode);
+    ADD_MULTI_TEST("/test/secure_set_variable/DBX/usermode",
+                   test_secure_set_dbx_usermode);
+    ADD_MULTI_TEST("/test/secure_set_variable/DBT/usermode",
+                   test_secure_set_dbt_usermode);
 
     r = g_test_run();
     free_globals();

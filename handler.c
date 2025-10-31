@@ -66,6 +66,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <assert.h>
 
 #include <openssl/objects.h>
 #include <openssl/rsa.h>
@@ -283,8 +284,10 @@ do_get_variable(uint8_t *comm_buf)
     struct efi_variable *l;
 
     ptr = comm_buf;
-    unserialize_uint32(&ptr); /* version */
-    unserialize_command(&ptr);
+    if (snoop_command(&ptr, NULL, NULL, NULL) != EFI_SUCCESS) {
+        assert(0);
+        return;
+    }
     name = unserialize_data(&ptr, &name_len, NAME_LIMIT);
     if (!name) {
         serialize_result(&comm_buf, name_len == 0 ? EFI_NOT_FOUND : EFI_DEVICE_ERROR);
@@ -1586,6 +1589,7 @@ debug_all_variables(const struct efi_variable *l)
 static void
 do_set_variable(uint8_t *comm_buf)
 {
+    UINT32 version;
     UINTN name_len, data_len;
     struct efi_variable *l, *prev = NULL;
     uint8_t *ptr, *name, *data;
@@ -1597,17 +1601,22 @@ do_set_variable(uint8_t *comm_buf)
     EFI_TIME timestamp;
 
     ptr = comm_buf;
-    unserialize_uint32(&ptr); /* version */
-    unserialize_command(&ptr);
+    if (snoop_command(&ptr, &version, NULL, NULL) != EFI_SUCCESS) {
+        assert(0);
+        return;
+    }
     name = unserialize_data(&ptr, &name_len, NAME_LIMIT);
     if (!name) {
         serialize_result(&comm_buf, name_len == 0 ? EFI_INVALID_PARAMETER : EFI_DEVICE_ERROR);
         return;
     }
     unserialize_guid(&ptr, &guid);
-    data = unserialize_data(&ptr, &data_len, DATA_LIMIT);
+    data = unserialize_data(&ptr, &data_len, data_limit(version));
     if (!data && data_len) {
-        serialize_result(&comm_buf, data_len > DATA_LIMIT ? EFI_OUT_OF_RESOURCES : EFI_DEVICE_ERROR);
+        serialize_result(&comm_buf,
+                data_len > data_limit(version)
+                    ? EFI_OUT_OF_RESOURCES
+                    : EFI_DEVICE_ERROR);
         free(name);
         return;
     }
@@ -1757,7 +1766,7 @@ do_set_variable(uint8_t *comm_buf)
                         }
                     }
 
-                    if (l->data_len + data_len > DATA_LIMIT ||
+                    if (l->data_len + data_len > data_limit(version) ||
                             get_space_usage() + data_len > TOTAL_LIMIT) {
                         serialize_result(&ptr, EFI_OUT_OF_RESOURCES);
                         goto err;
@@ -1923,8 +1932,10 @@ do_get_next_variable(uint8_t *comm_buf)
     BOOLEAN at_runtime;
 
     ptr = comm_buf;
-    unserialize_uint32(&ptr); /* version */
-    unserialize_command(&ptr);
+    if (snoop_command(&ptr, NULL, NULL, NULL) != EFI_SUCCESS) {
+        assert(0);
+        return;
+    }
     avail_len = unserialize_uintn(&ptr);
     name = unserialize_data(&ptr, &name_len, NAME_LIMIT);
     if (!name && name_len) {
@@ -1978,12 +1989,15 @@ out:
 static void
 do_query_variable_info(uint8_t *comm_buf)
 {
+    UINT32 version;
     uint8_t *ptr;
     UINT32 attr;
 
     ptr = comm_buf;
-    unserialize_uint32(&ptr); /* version */
-    unserialize_command(&ptr);
+    if (snoop_command(&ptr, &version, NULL, NULL) != EFI_SUCCESS) {
+        assert(0);
+        return;
+    }
     attr = unserialize_uint32(&ptr);
 
     ptr = comm_buf;
@@ -2000,7 +2014,7 @@ do_query_variable_info(uint8_t *comm_buf)
     serialize_result(&ptr, EFI_SUCCESS);
     serialize_uint64(&ptr, TOTAL_LIMIT);
     serialize_uint64(&ptr, TOTAL_LIMIT - get_space_usage());
-    serialize_uint64(&ptr, DATA_LIMIT);
+    serialize_uint64(&ptr, data_limit(version));
 }
 
 static void
@@ -2023,8 +2037,10 @@ do_notify_sb_failure(uint8_t *comm_buf)
     called = true;
 
     ptr = comm_buf;
-    unserialize_uint32(&ptr); /* version */
-    unserialize_command(&ptr);
+    if (snoop_command(&ptr, NULL, NULL, NULL) != EFI_SUCCESS) {
+        assert(0);
+        return;
+    }
 
     ret = db->sb_notify();
 
@@ -2032,19 +2048,69 @@ do_notify_sb_failure(uint8_t *comm_buf)
     serialize_result(&ptr, ret ? EFI_SUCCESS : EFI_DEVICE_ERROR);
 }
 
-void dispatch_command(uint8_t *comm_buf)
+UINTN data_limit(UINT32 version) {
+    switch (version) {
+    case 1:
+        return DATA_LIMIT_V1;
+    case 2:
+        return DATA_LIMIT_V2;
+    default:
+        assert(0);
+        return 0;
+    }
+}
+
+EFI_STATUS snoop_command(uint8_t **comm_buf, UINT32 *out_version,
+                         UINT32 *out_nr_pages, enum command_t *out_command)
 {
-    enum command_t command;
+    uint8_t *ptr = *comm_buf;
     UINT32 version;
-    uint8_t *ptr = comm_buf;
+    UINT32 nr_pages;
+    enum command_t command;
 
     version = unserialize_uint32(&ptr);
-    if (version != 1) {
+    switch (version) {
+    case 1:
+        nr_pages = SHMEM_PAGES_V1;
+        break;
+    case 2:
+        nr_pages = unserialize_uint32(&ptr);
+        if (nr_pages < SHMEM_PAGES_V2_MIN || nr_pages > SHMEM_PAGES_V2_MAX) {
+            DBG("Bad shmem page count: %u\n", nr_pages);
+            return EFI_INVALID_PARAMETER;
+        }
+        break;
+    default:
         DBG("Unknown version: %u\n", version);
-        return;
+        return EFI_INVALID_PARAMETER;
     }
 
     command = unserialize_command(&ptr);
+
+    if (out_version)
+        *out_version = version;
+    if (out_nr_pages)
+        *out_nr_pages = nr_pages;
+    if (out_command)
+        *out_command = command;
+    *comm_buf = ptr;
+    return EFI_SUCCESS;
+}
+
+void dispatch_command(uint8_t *comm_buf)
+{
+    UINT32 version, nr_pages;
+    enum command_t command;
+    uint8_t *ptr = comm_buf;
+    EFI_STATUS status;
+
+    status = snoop_command(&ptr, &version, &nr_pages, &command);
+    if (status != EFI_SUCCESS) {
+        DBG("snoop_command refused version data\n");
+        serialize_result(&ptr, EFI_INVALID_PARAMETER);
+        return;
+    }
+
     switch (command) {
     case COMMAND_GET_VARIABLE:
         DBG("COMMAND_GET_VARIABLE\n");
@@ -2161,14 +2227,15 @@ set_variable_from_auth(const uint8_t *name, UINTN name_len, const EFI_GUID *guid
     if (append)
         attr |= EFI_VARIABLE_APPEND_WRITE;
 
-    cmd_buf = calloc(SHMEM_PAGES, PAGE_SIZE);
+    cmd_buf = calloc(SHMEM_PAGES_V2_MAX, PAGE_SIZE);
     if (!cmd_buf) {
         ERR("Failed to allocate command buffer\n");
         goto out;
     }
 
     ptr = cmd_buf;
-    serialize_uint32(&ptr, 1); /* version */
+    serialize_uint32(&ptr, 2); /* version */
+    serialize_uint32(&ptr, SHMEM_PAGES_V2_MAX); /* nr_pages */
     serialize_uint32(&ptr, COMMAND_SET_VARIABLE);
     serialize_data(&ptr, name, name_len);
     serialize_guid(&ptr, guid);
@@ -2257,7 +2324,7 @@ load_one_auth_data(const char *path, uint8_t **data_out, off_t *len)
      * This will be checked later during SetVariable but check it now to avoid
      * reading a malicously large file into memory.
      */
-    if (st.st_size > DATA_LIMIT) {
+    if (st.st_size > DATA_LIMIT_MAX) {
         ERR("Auth file '%s' is too large: %ld\n", path, st.st_size);
         fclose(f);
         return false;

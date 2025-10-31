@@ -80,7 +80,7 @@ do_get(const char *guid_str, const char *name, bool show_attr)
     serialize_uint32(&ptr, COMMAND_GET_VARIABLE);
     serialize_data(&ptr, variable_name, name_size);
     serialize_guid(&ptr, &guid);
-    serialize_uintn(&ptr, DATA_LIMIT);
+    serialize_uintn(&ptr, DATA_LIMIT_V1);
     *ptr = 0;
 
     dispatch_command(cmd_buf);
@@ -109,13 +109,13 @@ do_get(const char *guid_str, const char *name, bool show_attr)
         uint8_t *data;
         UINTN data_len;
 
-        data = unserialize_data(&ptr, &data_len, DATA_LIMIT);
+        data = unserialize_data(&ptr, &data_len, DATA_LIMIT_V1);
         if (!data) {
             if (data_len == 0) {
                 /* The variable is empty - nothing to write out. */
                 return true;
             } else {
-                ERR("Data too large: %lu > %u\n", data_len, DATA_LIMIT);
+                ERR("Data too large: %lu > %u\n", data_len, DATA_LIMIT_V1);
                 return false;
             }
         }

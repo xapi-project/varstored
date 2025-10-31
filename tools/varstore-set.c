@@ -93,7 +93,7 @@ do_set(const char *guid_str, const char *name, const char *attr_str,
         ERR("Failed to open %s\n", path);
         return false;
     }
-    if (fstat(fileno(f), &st) == -1 || st.st_size > DATA_LIMIT) {
+    if (fstat(fileno(f), &st) == -1 || st.st_size > DATA_LIMIT_V1) {
         printf("Invalid file size\n");
         fclose(f);
         return false;
