@@ -903,6 +903,7 @@ MULTI_TEST(test_get_variable_too_small)
 {
     uint8_t *ptr;
     UINTN data_len;
+    UINT32 attr;
     EFI_STATUS status;
 
     reset_test(version);
@@ -918,6 +919,11 @@ MULTI_TEST(test_get_variable_too_small)
     g_assert_cmpuint(status, ==, EFI_BUFFER_TOO_SMALL);
     data_len = unserialize_uintn(&ptr);
     g_assert_cmpuint(data_len, ==, sizeof(tdata1));
+
+    if (version >= 2) {
+        attr = unserialize_uint32(&ptr);
+        g_assert_cmpuint(attr, ==, ATTR_B);
+    }
 }
 
 MULTI_TEST(test_query_variable_info)

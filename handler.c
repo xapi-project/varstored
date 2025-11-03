@@ -277,6 +277,7 @@ internal_get_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
 static void
 do_get_variable(uint8_t *comm_buf)
 {
+    UINT32 version;
     uint8_t *ptr, *name;
     EFI_GUID guid;
     UINTN name_len, data_len;
@@ -284,7 +285,7 @@ do_get_variable(uint8_t *comm_buf)
     struct efi_variable *l;
 
     ptr = comm_buf;
-    if (snoop_command(&ptr, NULL, NULL, NULL) != EFI_SUCCESS) {
+    if (snoop_command(&ptr, &version, NULL, NULL) != EFI_SUCCESS) {
         assert(0);
         return;
     }
@@ -310,6 +311,8 @@ do_get_variable(uint8_t *comm_buf)
             if (data_len < l->data_len) {
                 serialize_result(&ptr, EFI_BUFFER_TOO_SMALL);
                 serialize_uintn(&ptr, l->data_len);
+                if (version >= 2)
+                    serialize_uint32(&ptr, l->attributes);
             } else {
                 serialize_result(&ptr, EFI_SUCCESS);
                 serialize_uint32(&ptr, l->attributes);
