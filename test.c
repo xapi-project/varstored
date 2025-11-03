@@ -50,7 +50,8 @@ const enum log_level log_level = LOG_LVL_ERROR;
     static void test_name(UINT32 version)
 
 /* The communication buffer. */
-static uint8_t buf[SHMEM_PAGES_V2_MAX * PAGE_SIZE];
+static uint8_t *buf = NULL;
+static UINT32 buf_pages = 0;
 
 /* Wide char support */
 
@@ -344,6 +345,14 @@ static void free_globals(void)
     free(certPK);
 }
 
+static void reset_buf(size_t nr_pages)
+{
+    free(buf);
+    buf = calloc(nr_pages, PAGE_SIZE);
+    assert(buf);
+    buf_pages = nr_pages;
+}
+
 static void reset_vars(void)
 {
     struct efi_variable *l, *tmp;
@@ -359,6 +368,21 @@ static void reset_vars(void)
     var_list = NULL;
 }
 
+static inline void reset_test(UINT32 version) {
+    switch (version) {
+    case 1:
+        reset_buf(SHMEM_PAGES_V1);
+        break;
+    case 2:
+        reset_buf(SHMEM_PAGES_V2_MAX);
+        break;
+    default:
+        assert(0);
+    }
+
+    reset_vars();
+}
+
 static void serialize_buf_version(uint8_t **ptr, UINT32 version)
 {
     switch (version)
@@ -368,7 +392,7 @@ static void serialize_buf_version(uint8_t **ptr, UINT32 version)
         break;
     case 2:
         serialize_uint32(ptr, 2);
-        serialize_uint32(ptr, SHMEM_PAGES_V2_MAX);
+        serialize_uint32(ptr, buf_pages);
         break;
     default:
         assert(0);
@@ -767,7 +791,7 @@ MULTI_TEST(test_get_variable_no_name)
     EFI_STATUS status;
     dstring *empty = alloc_dstring("");
 
-    reset_vars();
+    reset_test(version);
 
     /* An empty name should not be found. */
     call_get_variable(version, empty, &nullguid, BSIZ, 0);
@@ -784,7 +808,7 @@ MULTI_TEST(test_get_variable_long_name)
     EFI_STATUS status;
     dstring *bigname;
 
-    reset_vars();
+    reset_test(version);
     bigname = alloc_dstring_unset(NAME_LIMIT / sizeof(uint16_t) + 1);
     memset(bigname->data, 42, dstring_data_size(bigname));
 
@@ -801,7 +825,7 @@ MULTI_TEST(test_get_variable_not_found)
     uint8_t *ptr;
     EFI_STATUS status;
 
-    reset_vars();
+    reset_test(version);
     sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
     sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_B);
     sv_ok(version, tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_B);
@@ -833,7 +857,7 @@ MULTI_TEST(test_get_variable_found)
     UINT32 attr;
     EFI_STATUS status;
 
-    reset_vars();
+    reset_test(version);
     sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
     sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_BR);
     sv_ok(version, tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_B);
@@ -881,7 +905,7 @@ MULTI_TEST(test_get_variable_too_small)
     UINTN data_len;
     EFI_STATUS status;
 
-    reset_vars();
+    reset_test(version);
     sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
 
     /*
@@ -902,7 +926,7 @@ MULTI_TEST(test_query_variable_info)
     EFI_STATUS status;
     dstring *longname;
 
-    reset_vars();
+    reset_test(version);
 
     /*
      * Use a long variable name to ensure the variable is larger than the
@@ -976,7 +1000,7 @@ MULTI_TEST(test_get_next_variable_empty)
     uint8_t *ptr;
     EFI_STATUS status;
 
-    reset_vars();
+    reset_test(version);
 
     /* No variables */
     call_get_next_variable(version, BSIZ, NULL, &nullguid, 0);
@@ -991,7 +1015,7 @@ MULTI_TEST(test_get_next_variable_long_name)
     EFI_STATUS status;
     dstring *tmp_name;
 
-    reset_vars();
+    reset_test(version);
     tmp_name = alloc_dstring_unset(NAME_LIMIT / sizeof(uint16_t) + 1);
     memset(tmp_name->data, 42, dstring_data_size(tmp_name));
 
@@ -1015,7 +1039,7 @@ MULTI_TEST(test_get_next_variable_only_runtime)
      * Only runtime variables should be returned at runtime.
      */
 
-    reset_vars();
+    reset_test(version);
     sv_ok(version, tname5, &tguid5, tdata5, sizeof(tdata5), ATTR_B);
     sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_BR);
     sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
@@ -1057,7 +1081,7 @@ MULTI_TEST(test_get_next_variable_too_small)
     UINTN data_len;
     EFI_STATUS status;
 
-    reset_vars();
+    reset_test(version);
     sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
 
     /*
@@ -1079,7 +1103,7 @@ MULTI_TEST(test_get_next_variable_no_match)
     EFI_STATUS status;
     EFI_GUID guid;
 
-    reset_vars();
+    reset_test(version);
     sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
     sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_B);
 
@@ -1121,7 +1145,7 @@ MULTI_TEST(test_get_next_variable_all)
      * At boot time, all variables should be retrieved.
      */
 
-    reset_vars();
+    reset_test(version);
     sv_ok(version, tname5, &tguid5, tdata5, sizeof(tdata5), ATTR_B);
     sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_BR);
     sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
@@ -1195,7 +1219,7 @@ MULTI_TEST(test_set_variable_attr)
     uint8_t *ptr;
     EFI_STATUS status;
 
-    reset_vars();
+    reset_test(version);
     setup_variables();
 
     /* hardware error record is not supported */
@@ -1254,7 +1278,7 @@ MULTI_TEST(test_set_variable_set)
     EFI_STATUS status;
     UINT32 attr;
 
-    reset_vars();
+    reset_test(version);
 
     /* Basic SetVariable usage. */
     sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
@@ -1349,7 +1373,7 @@ MULTI_TEST(test_set_variable_update)
     EFI_STATUS status;
     UINT32 attr;
 
-    reset_vars();
+    reset_test(version);
 
     /* Insert a variable... */
     sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
@@ -1397,7 +1421,7 @@ MULTI_TEST(test_set_variable_append)
     EFI_STATUS status;
     UINT32 attr;
 
-    reset_vars();
+    reset_test(version);
 
     /* Insert some variables */
     sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
@@ -1444,7 +1468,7 @@ MULTI_TEST(test_set_variable_delete)
     uint8_t *ptr;
     EFI_STATUS status;
 
-    reset_vars();
+    reset_test(version);
 
     sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_B);
     sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_B);
@@ -1529,7 +1553,7 @@ MULTI_TEST(test_set_variable_resource_limit)
     UINTN remaining = TOTAL_LIMIT;
     uint8_t tmp[TOTAL_LIMIT] = {0};
 
-    reset_vars();
+    reset_test(version);
 
     /* Check per-variable limit */
     call_set_variable(version, tname1, &tguid1, tmp, data_limit(version) + 1, ATTR_B, 0);
@@ -1588,7 +1612,7 @@ MULTI_TEST(test_set_variable_many_vars)
     const int count = TOTAL_LIMIT /
                       (VARIABLE_SIZE_OVERHEAD + dstring_data_size(dname) + 1);
 
-    reset_vars();
+    reset_test(version);
 
     /* Set more variables than are allowed based on the variable "overhead". */
     for (i = 0; i < count + 1; i++) {
@@ -1612,13 +1636,13 @@ MULTI_TEST(test_set_variable_non_volatile)
     UINT32 attr;
 
     remove(save_name);
-    reset_vars();
+    reset_test(version);
     sv_ok(version, tname1, &tguid1, tdata1, sizeof(tdata1), ATTR_BNV);
     sv_ok(version, tname2, &tguid2, tdata2, sizeof(tdata2), ATTR_B);
     sv_ok(version, tname3, &tguid3, tdata3, sizeof(tdata3), ATTR_BRNV);
     sv_ok(version, tname4, &tguid4, tdata4, sizeof(tdata4), ATTR_BR);
 
-    reset_vars();
+    reset_test(version);
     db->init();
 
     call_get_variable(version, tname1, &tguid1, BSIZ, 0);
@@ -1656,7 +1680,7 @@ MULTI_TEST(test_set_variable_non_volatile)
     /* Update, reload & check */
     sv_ok(version, tname1, &tguid1, tdata2, sizeof(tdata2), ATTR_BNV);
 
-    reset_vars();
+    reset_test(version);
     db->init();
 
     call_get_variable(version, tname1, &tguid1, BSIZ, 0);
@@ -1677,7 +1701,7 @@ MULTI_TEST(test_set_variable_non_volatile)
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
 
-    reset_vars();
+    reset_test(version);
     db->init();
 
     call_get_variable(version, tname3, &tguid3, BSIZ, 0);
@@ -1698,7 +1722,7 @@ MULTI_TEST(test_set_variable_non_volatile)
     status = unserialize_uintn(&ptr);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
 
-    reset_vars();
+    reset_test(version);
     db->init();
 
     call_get_variable(version, tname3, &tguid3, BSIZ, 0);
@@ -1715,7 +1739,7 @@ MULTI_TEST(test_set_variable_special_vars)
     UINT32 attrs[] = {ATTR_BR, ATTR_BR | EFI_VARIABLE_APPEND_WRITE,
                       ATTR_BRNV, ATTR_BRNV_TIME, 0};
 
-    reset_vars();
+    reset_test(version);
     setup_variables();
 
     for (i = 0; i < ARRAY_SIZE(vars); i++) {
@@ -1760,7 +1784,7 @@ MULTI_TEST(test_set_variable_mor)
     uint8_t data[] = {0, 0};
     uint8_t expected = 0;
 
-    reset_vars();
+    reset_test(version);
     setup_variables();
     setup_mor_variables();
 
@@ -1860,7 +1884,7 @@ MULTI_TEST(test_set_variable_mor_key)
     uint8_t mor_control_data = 1;
     uint8_t expected;
 
-    reset_vars();
+    reset_test(version);
     setup_variables();
     setup_mor_variables();
 
@@ -1939,7 +1963,7 @@ MULTI_TEST(test_use_bad_digest)
      * algorithm of SHA-256 is accepted.
      */
 
-    reset_vars();
+    reset_test(version);
     setup_variables();
 
     sign_and_check(version, tname1, &tguid1, ATTR_B_TIME, &test_timea, tdata1,
@@ -2040,7 +2064,7 @@ static void test_set_secure_variable(UINT32 version)
 
 MULTI_TEST(test_secure_set_variable_setupmode)
 {
-    reset_vars();
+    reset_test(version);
     setup_variables();
 
     /*
@@ -2058,7 +2082,7 @@ MULTI_TEST(test_secure_set_variable_setupmode)
 
 MULTI_TEST(test_secure_set_variable_usermode)
 {
-    reset_vars();
+    reset_test(version);
     setup_variables();
 
     /* Check we're in setup mode */
@@ -2084,7 +2108,7 @@ MULTI_TEST(test_secure_set_PK)
     uint8_t *ptr;
     size_t i;
 
-    reset_vars();
+    reset_test(version);
     setup_variables();
 
     check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
@@ -2464,7 +2488,7 @@ MULTI_TEST(test_secure_set_KEK_setupmode)
     UINT32 attr;
     EFI_TIME test_time = {2018, 6, 20, 13, 38, 0, 0, 0, 0, 0, 0};
 
-    reset_vars();
+    reset_test(version);
     setup_variables();
 
     sig_db_check(version, KEK_name, &gEfiGlobalVariableGuid, &test_time, true);
@@ -2505,7 +2529,7 @@ MULTI_TEST(test_secure_set_KEK_usermode)
 {
     EFI_TIME test_time = {2018, 6, 20, 13, 38, 0, 0, 0, 0, 0, 0};
 
-    reset_vars();
+    reset_test(version);
     setup_variables();
     set_usermode(version);
 
@@ -2568,7 +2592,7 @@ static void test_secure_set_db__setupmode(UINT32 version, const dstring *key_db)
 {
     EFI_TIME test_time = {2018, 6, 20, 13, 38, 0, 0, 0, 0, 0, 0};
 
-    reset_vars();
+    reset_test(version);
     setup_variables();
 
     check_variable_data(version, setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
@@ -2603,7 +2627,7 @@ static void test_secure_set_db__usermode(UINT32 version, const dstring *key_db)
     size_t combined_len;
     char *cert_list[] = {"testPK.pem", "testcertB.pem", NULL};
 
-    reset_vars();
+    reset_test(version);
     setup_variables();
     set_usermode(version);
 
