@@ -425,8 +425,20 @@ static EFI_STATUS call_get_variable_data(UINT32 version, const dstring *name,
     call_get_variable(version, name, guid, avail, at_runtime);
 
     status = unserialize_uintn(&ptr);
-    unserialize_uint32(&ptr); /* attr */
-    *data = unserialize_data(&ptr, len, BSIZ);
+    switch (status) {
+    case EFI_SUCCESS:
+        unserialize_uint32(&ptr); /* attr */
+        *data = unserialize_data(&ptr, len, BSIZ);
+        break;
+    case EFI_BUFFER_TOO_SMALL:
+        *data = NULL;
+        *len = unserialize_uintn(&ptr);
+        break;
+    default:
+        *data = NULL;
+        *len = 0;
+        break;
+    }
     return status;
 }
 
