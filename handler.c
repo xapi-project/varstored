@@ -199,6 +199,43 @@ get_space_usage(void)
     return total;
 }
 
+static UINTN
+get_buf_avail(UINT32 nr_pages, uint8_t *comm_buf, uint8_t *ptr)
+{
+    ptrdiff_t offset = (ptrdiff_t)ptr - (ptrdiff_t)comm_buf;
+    ptrdiff_t bufsize = (ptrdiff_t)nr_pages * PAGE_SIZE;
+
+    if (offset < 0 || offset > bufsize) {
+        assert(0);
+        return 0;
+    }
+
+    return (UINTN)(bufsize - offset);
+}
+
+static inline uint8_t *
+unserialize_data_checked(UINT32 nr_pages, uint8_t *comm_buf,
+                         uint8_t **ptr, UINTN *len, UINTN limit)
+{
+    uint8_t *data;
+    UINTN avail;
+
+    *len = unserialize_uintn(ptr);
+    avail = get_buf_avail(nr_pages, comm_buf, *ptr);
+
+    if (*len > limit || *len == 0 || *len > avail)
+        return NULL;
+
+    data = malloc(*len);
+    if (!data)
+        return NULL;
+
+    memcpy(data, *ptr, *len);
+    *ptr += *len;
+
+    return data;
+}
+
 /* A limited version of SetVariable for internal use. */
 EFI_STATUS
 internal_set_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
@@ -277,19 +314,20 @@ internal_get_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
 static void
 do_get_variable(uint8_t *comm_buf)
 {
-    UINT32 version;
+    UINT32 version, nr_pages;
     uint8_t *ptr, *name;
     EFI_GUID guid;
-    UINTN name_len, data_len;
+    UINTN name_len, data_len, data_avail;
     BOOLEAN at_runtime;
     struct efi_variable *l;
 
     ptr = comm_buf;
-    if (snoop_command(&ptr, &version, NULL, NULL) != EFI_SUCCESS) {
+    if (snoop_command(&ptr, &version, &nr_pages, NULL) != EFI_SUCCESS) {
         assert(0);
         return;
     }
-    name = unserialize_data(&ptr, &name_len, NAME_LIMIT);
+    name = unserialize_data_checked(nr_pages, comm_buf,
+            &ptr, &name_len, NAME_LIMIT);
     if (!name) {
         serialize_result(&comm_buf, name_len == 0 ? EFI_NOT_FOUND : EFI_DEVICE_ERROR);
         return;
@@ -299,6 +337,17 @@ do_get_variable(uint8_t *comm_buf)
     at_runtime = unserialize_boolean(&ptr);
 
     ptr = comm_buf;
+    data_avail = get_buf_avail(nr_pages, comm_buf, ptr) - sizeof(EFI_STATUS) -
+            sizeof(UINT32);
+    /*
+     * DataSize is not firmware-controlled, and callers are not aware of comm
+     * buffer size. Therefore, we can't return an error code even if DataSize is
+     * larger than the actual available buffer size; all we can do is to limit
+     * data_len accordingly.
+     */
+    if (data_len > data_avail)
+        data_len = data_avail;
+
     l = var_list;
     while (l) {
         if (l->name_len == name_len &&
@@ -1592,7 +1641,7 @@ debug_all_variables(const struct efi_variable *l)
 static void
 do_set_variable(uint8_t *comm_buf)
 {
-    UINT32 version;
+    UINT32 version, nr_pages;
     UINTN name_len, data_len;
     struct efi_variable *l, *prev = NULL;
     uint8_t *ptr, *name, *data;
@@ -1604,17 +1653,19 @@ do_set_variable(uint8_t *comm_buf)
     EFI_TIME timestamp;
 
     ptr = comm_buf;
-    if (snoop_command(&ptr, &version, NULL, NULL) != EFI_SUCCESS) {
+    if (snoop_command(&ptr, &version, &nr_pages, NULL) != EFI_SUCCESS) {
         assert(0);
         return;
     }
-    name = unserialize_data(&ptr, &name_len, NAME_LIMIT);
+    name = unserialize_data_checked(nr_pages, comm_buf,
+            &ptr, &name_len, NAME_LIMIT);
     if (!name) {
         serialize_result(&comm_buf, name_len == 0 ? EFI_INVALID_PARAMETER : EFI_DEVICE_ERROR);
         return;
     }
     unserialize_guid(&ptr, &guid);
-    data = unserialize_data(&ptr, &data_len, data_limit(version));
+    data = unserialize_data_checked(nr_pages, comm_buf,
+            &ptr, &data_len, data_limit(version));
     if (!data && data_len) {
         serialize_result(&comm_buf,
                 data_len > data_limit(version)
@@ -1928,6 +1979,7 @@ err:
 static void
 do_get_next_variable(uint8_t *comm_buf)
 {
+    UINT32 nr_pages;
     UINTN name_len, avail_len;
     uint8_t *ptr, *name;
     struct efi_variable *l;
@@ -1935,12 +1987,13 @@ do_get_next_variable(uint8_t *comm_buf)
     BOOLEAN at_runtime;
 
     ptr = comm_buf;
-    if (snoop_command(&ptr, NULL, NULL, NULL) != EFI_SUCCESS) {
+    if (snoop_command(&ptr, NULL, &nr_pages, NULL) != EFI_SUCCESS) {
         assert(0);
         return;
     }
     avail_len = unserialize_uintn(&ptr);
-    name = unserialize_data(&ptr, &name_len, NAME_LIMIT);
+    name = unserialize_data_checked(nr_pages, comm_buf,
+            &ptr, &name_len, NAME_LIMIT);
     if (!name && name_len) {
         serialize_result(&comm_buf, EFI_DEVICE_ERROR);
         return;

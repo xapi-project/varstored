@@ -1962,6 +1962,60 @@ MULTI_TEST(test_set_variable_mor_key)
              data, 8, ATTR_BRNV, EFI_ACCESS_DENIED);
 }
 
+static void test_set_variable_v2_downgrade(void)
+{
+    EFI_STATUS status;
+    uint8_t tmp[DATA_LIMIT_MAX] = {0};
+    uint8_t *ptr;
+
+    reset_test(2);
+
+    sv_ok(2, tname1, &tguid1, tmp, DATA_LIMIT_V2, ATTR_B);
+
+    reset_buf(SHMEM_PAGES_V1);
+
+    call_get_variable(1, tname1, &tguid1, DATA_LIMIT_V1, 1);
+
+    /* Whatever it does here, it shouldn't crash. */
+
+    ptr = buf;
+    status = unserialize_uintn(&ptr); /* status */
+    g_assert_cmpuint(status, !=, EFI_SUCCESS);
+}
+
+static void test_set_variable_v2_short_buffer(void)
+{
+    UINT32 nr_pages;
+    EFI_STATUS status;
+    uint8_t tmp[DATA_LIMIT_V2] = {0};
+    uint8_t *ptr = buf;
+
+    reset_test(2);
+
+    sv_ok(2, tname1, &tguid1, tmp, DATA_LIMIT_V2, ATTR_B);
+
+    for (nr_pages = 1; nr_pages < SHMEM_PAGES_V2_MIN; nr_pages++) {
+        reset_buf(nr_pages);
+        call_get_variable(2, tname1, &tguid1, DATA_LIMIT_V2, 0);
+        ptr = buf;
+        status = unserialize_uintn(&ptr); /* status */
+        g_assert_cmpuint(status, ==, EFI_INVALID_PARAMETER);
+    }
+    /*
+     * TODO: For now all nr_pages values within range are valid for containing
+     * a variable of size DATA_LIMIT_V2. If DATA_LIMIT_V2 is increased, full
+     * serialization bounds check would be needed.
+     */
+    for (nr_pages = SHMEM_PAGES_V2_MIN; nr_pages <= SHMEM_PAGES_V2_MAX;
+            nr_pages++) {
+        reset_buf(nr_pages);
+        call_get_variable(2, tname1, &tguid1, DATA_LIMIT_V2, 0);
+        ptr = buf;
+        status = unserialize_uintn(&ptr); /* status */
+        g_assert_cmpuint(status, ==, EFI_SUCCESS);
+    }
+}
+
 static void set_usermode(UINT32 version)
 {
     /* Move into user mode by enrolling Platform Key. */
@@ -2778,6 +2832,10 @@ int main(int argc, char **argv)
                    test_set_variable_mor);
     ADD_MULTI_TEST("/test/set_variable/mor_key",
                    test_set_variable_mor_key);
+    g_test_add_func("/test/set_variable/v2_downgrade",
+                   test_set_variable_v2_downgrade);
+    g_test_add_func("/test/set_variable/v2_short_buffer",
+                   test_set_variable_v2_short_buffer);
 
     ADD_MULTI_TEST("/test/secure_set_variable/use_bad_digest",
                    test_use_bad_digest);
