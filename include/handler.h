@@ -105,6 +105,10 @@ extern struct efi_variable *var_list;
 UINTN data_limit(UINT32 version);
 EFI_STATUS snoop_command(uint8_t **comm_buf, UINT32 *out_version,
                          UINT32 *out_nr_pages, enum command_t *out_command);
+void skip_command(uint8_t **comm_buf, UINT32 version, UINT32 nr_pages,
+                  enum command_t command);
+void dispatch_snooped_command(uint8_t *comm_buf, UINT32 version, UINT32 nr_pages,
+                              enum command_t command);
 void dispatch_command(uint8_t *comm_buf);
 bool setup_crypto(void);
 bool setup_variables(void);

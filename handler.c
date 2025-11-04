@@ -312,9 +312,9 @@ internal_get_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
 }
 
 static void
-do_get_variable(uint8_t *comm_buf)
+do_get_variable(uint8_t *comm_buf, UINT32 version, UINT32 nr_pages,
+                enum command_t command)
 {
-    UINT32 version, nr_pages;
     uint8_t *ptr, *name;
     EFI_GUID guid;
     UINTN name_len, data_len, data_avail;
@@ -322,10 +322,7 @@ do_get_variable(uint8_t *comm_buf)
     struct efi_variable *l;
 
     ptr = comm_buf;
-    if (snoop_command(&ptr, &version, &nr_pages, NULL) != EFI_SUCCESS) {
-        assert(0);
-        return;
-    }
+    skip_command(&ptr, version, nr_pages, command);
     name = unserialize_data_checked(nr_pages, comm_buf,
             &ptr, &name_len, NAME_LIMIT);
     if (!name) {
@@ -1639,9 +1636,9 @@ debug_all_variables(const struct efi_variable *l)
 #endif
 
 static void
-do_set_variable(uint8_t *comm_buf)
+do_set_variable(uint8_t *comm_buf, UINT32 version, UINT32 nr_pages,
+                enum command_t command)
 {
-    UINT32 version, nr_pages;
     UINTN name_len, data_len;
     struct efi_variable *l, *prev = NULL;
     uint8_t *ptr, *name, *data;
@@ -1653,10 +1650,7 @@ do_set_variable(uint8_t *comm_buf)
     EFI_TIME timestamp;
 
     ptr = comm_buf;
-    if (snoop_command(&ptr, &version, &nr_pages, NULL) != EFI_SUCCESS) {
-        assert(0);
-        return;
-    }
+    skip_command(&ptr, version, nr_pages, command);
     name = unserialize_data_checked(nr_pages, comm_buf,
             &ptr, &name_len, NAME_LIMIT);
     if (!name) {
@@ -1977,9 +1971,9 @@ err:
 }
 
 static void
-do_get_next_variable(uint8_t *comm_buf)
+do_get_next_variable(uint8_t *comm_buf, UINT32 version, UINT32 nr_pages,
+                     enum command_t command)
 {
-    UINT32 nr_pages;
     UINTN name_len, avail_len;
     uint8_t *ptr, *name;
     struct efi_variable *l;
@@ -1987,10 +1981,7 @@ do_get_next_variable(uint8_t *comm_buf)
     BOOLEAN at_runtime;
 
     ptr = comm_buf;
-    if (snoop_command(&ptr, NULL, &nr_pages, NULL) != EFI_SUCCESS) {
-        assert(0);
-        return;
-    }
+    skip_command(&ptr, version, nr_pages, command);
     avail_len = unserialize_uintn(&ptr);
     name = unserialize_data_checked(nr_pages, comm_buf,
             &ptr, &name_len, NAME_LIMIT);
@@ -2043,17 +2034,14 @@ out:
 }
 
 static void
-do_query_variable_info(uint8_t *comm_buf)
+do_query_variable_info(uint8_t *comm_buf, UINT32 version, UINT32 nr_pages,
+                       enum command_t command)
 {
-    UINT32 version;
     uint8_t *ptr;
     UINT32 attr;
 
     ptr = comm_buf;
-    if (snoop_command(&ptr, &version, NULL, NULL) != EFI_SUCCESS) {
-        assert(0);
-        return;
-    }
+    skip_command(&ptr, version, nr_pages, command);
     attr = unserialize_uint32(&ptr);
 
     ptr = comm_buf;
@@ -2074,7 +2062,8 @@ do_query_variable_info(uint8_t *comm_buf)
 }
 
 static void
-do_notify_sb_failure(uint8_t *comm_buf)
+do_notify_sb_failure(uint8_t *comm_buf, UINT32 version, UINT32 nr_pages,
+                     enum command_t command)
 {
     uint8_t *ptr;
     bool ret;
@@ -2093,10 +2082,7 @@ do_notify_sb_failure(uint8_t *comm_buf)
     called = true;
 
     ptr = comm_buf;
-    if (snoop_command(&ptr, NULL, NULL, NULL) != EFI_SUCCESS) {
-        assert(0);
-        return;
-    }
+    skip_command(&ptr, version, nr_pages, command);
 
     ret = db->sb_notify();
 
@@ -2153,6 +2139,52 @@ EFI_STATUS snoop_command(uint8_t **comm_buf, UINT32 *out_version,
     return EFI_SUCCESS;
 }
 
+void skip_command(uint8_t **ptr, UINT32 version, UINT32 nr_pages,
+                  enum command_t command)
+{
+    (void) nr_pages;
+    (void) command;
+
+    unserialize_uint32(ptr);
+    if (version == 2)
+        unserialize_uint32(ptr);
+    unserialize_command(ptr);
+}
+
+void dispatch_snooped_command(uint8_t *comm_buf, UINT32 version,
+                              UINT32 nr_pages, enum command_t command)
+{
+    uint8_t *ptr = comm_buf;
+
+    skip_command(&ptr, version, nr_pages, command);
+
+    switch (command) {
+    case COMMAND_GET_VARIABLE:
+        DBG("COMMAND_GET_VARIABLE\n");
+        do_get_variable(comm_buf, version, nr_pages, command);
+        break;
+    case COMMAND_SET_VARIABLE:
+        DBG("COMMAND_SET_VARIABLE\n");
+        do_set_variable(comm_buf, version, nr_pages, command);
+        break;
+    case COMMAND_GET_NEXT_VARIABLE:
+        DBG("COMMAND_GET_NEXT_VARIABLE\n");
+        do_get_next_variable(comm_buf, version, nr_pages, command);
+        break;
+    case COMMAND_QUERY_VARIABLE_INFO:
+        DBG("COMMAND_QUERY_VARIABLE_INFO\n");
+        do_query_variable_info(comm_buf, version, nr_pages, command);
+        break;
+    case COMMAND_NOTIFY_SB_FAILURE:
+        DBG("COMMAND_NOTIFY_SB_FAILURE\n");
+        do_notify_sb_failure(comm_buf, version, nr_pages, command);
+        break;
+    default:
+        DBG("Unknown command\n");
+        break;
+    };
+}
+
 void dispatch_command(uint8_t *comm_buf)
 {
     UINT32 version, nr_pages;
@@ -2162,36 +2194,12 @@ void dispatch_command(uint8_t *comm_buf)
 
     status = snoop_command(&ptr, &version, &nr_pages, &command);
     if (status != EFI_SUCCESS) {
-        DBG("snoop_command refused version data\n");
-        serialize_result(&ptr, EFI_INVALID_PARAMETER);
+        ptr = comm_buf;
+        serialize_result(&ptr, status);
         return;
     }
 
-    switch (command) {
-    case COMMAND_GET_VARIABLE:
-        DBG("COMMAND_GET_VARIABLE\n");
-        do_get_variable(comm_buf);
-        break;
-    case COMMAND_SET_VARIABLE:
-        DBG("COMMAND_SET_VARIABLE\n");
-        do_set_variable(comm_buf);
-        break;
-    case COMMAND_GET_NEXT_VARIABLE:
-        DBG("COMMAND_GET_NEXT_VARIABLE\n");
-        do_get_next_variable(comm_buf);
-        break;
-    case COMMAND_QUERY_VARIABLE_INFO:
-        DBG("COMMAND_QUERY_VARIABLE_INFO\n");
-        do_query_variable_info(comm_buf);
-        break;
-    case COMMAND_NOTIFY_SB_FAILURE:
-        DBG("COMMAND_NOTIFY_SB_FAILURE\n");
-        do_notify_sb_failure(comm_buf);
-        break;
-    default:
-        DBG("Unknown command\n");
-        break;
-    };
+    dispatch_snooped_command(comm_buf, version, nr_pages, command);
 }
 
 bool

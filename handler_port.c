@@ -51,7 +51,8 @@ io_port_writel(uint64_t offset, uint64_t size, uint32_t val)
 {
     xen_pfn_t pfns[SHMEM_PAGES_V2_MAX];
     void *shmem;
-    UINT32 nr_pages;
+    UINT32 version, nr_pages;
+    enum command_t command;
     int i;
     uint8_t *ptr;
     EFI_STATUS status;
@@ -77,7 +78,7 @@ io_port_writel(uint64_t offset, uint64_t size, uint32_t val)
 
     ptr = shmem;
     /* nr_pages is the only thing we're interested in here */
-    status = snoop_command(&ptr, NULL, &nr_pages, NULL);
+    status = snoop_command(&ptr, &version, &nr_pages, &command);
 
     xenforeignmemory_unmap(io_info.fmem, shmem, 1);
 
@@ -95,7 +96,7 @@ io_port_writel(uint64_t offset, uint64_t size, uint32_t val)
         return;
     }
 
-    dispatch_command(shmem);
+    dispatch_snooped_command(shmem, version, nr_pages, command);
 
     xenforeignmemory_unmap(io_info.fmem, shmem, nr_pages);
 
