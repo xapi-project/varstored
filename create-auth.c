@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <errno.h>
+#include <stdbool.h>
 
 #include <openssl/objects.h>
 #include <openssl/pem.h>
@@ -112,23 +113,14 @@ certs_to_sig_list(X509 **cert, int count, UINTN *data_len,
     return data;
 }
 
-/* Returns a signature suitable for a time-based authenticated write. */
+/* Returns data ready for signing. */
 static uint8_t *
-sign_data(X509 *cert, EVP_PKEY *key, const uint8_t *name, UINTN name_len,
-          const EFI_GUID *guid, UINT32 attr, EFI_TIME *timestamp,
-          const uint8_t *data, UINTN data_len, UINTN *sig_len)
+create_signable_data(const uint8_t *name, UINTN name_len,
+                     const EFI_GUID *guid, UINT32 attr, EFI_TIME *timestamp,
+                     const uint8_t *data, UINTN data_len, UINTN *signable_len)
 {
     UINTN len;
-    int p7_len;
-    uint8_t *sig, *buf, *ptr;
-    PKCS7 *p7;
-    BIO *bio;
-    const EVP_MD *md;
-
-    if (!key) {
-        *sig_len = 0;
-        return NULL;
-    }
+    uint8_t *buf, *ptr;
 
     len = name_len + GUID_LEN + sizeof(attr) + sizeof(*timestamp) + data_len;
     buf = malloc(len);
@@ -148,7 +140,27 @@ sign_data(X509 *cert, EVP_PKEY *key, const uint8_t *name, UINTN name_len,
     ptr += sizeof(*timestamp);
     memcpy(ptr, data, data_len);
 
-    bio = BIO_new_mem_buf(buf, len);
+    *signable_len = len;
+
+    return buf;
+}
+
+/* Returns a signature suitable for a time-based authenticated write. */
+static uint8_t *
+sign_data(X509 *cert, EVP_PKEY *key, const uint8_t *data, UINTN data_len, UINTN *sig_len)
+{
+    int p7_len;
+    uint8_t *sig, *ptr;
+    PKCS7 *p7;
+    BIO *bio;
+    const EVP_MD *md;
+
+    if (!key) {
+        printf("No key provided to sign with\n");
+        exit(1);
+    }
+
+    bio = BIO_new_mem_buf(data, data_len);
     if (!bio) {
         printf("Failed to create bio\n");
         exit(1);
@@ -195,7 +207,6 @@ sign_data(X509 *cert, EVP_PKEY *key, const uint8_t *name, UINTN name_len,
 
     PKCS7_free(p7);
     BIO_free(bio);
-    free(buf);
 
     return sig;
 }
@@ -225,15 +236,15 @@ create_descriptor(UINTN sig_len, EFI_TIME *timestamp, UINTN *descriptor_len)
 static void
 usage(const char *progname)
 {
-    printf("usage: %s [-k <key>] [-c cert] name output cert [cert...]\n",
+    printf("usage: %s [-o] [-t <seconds>] [-k <key>] [-c cert] [-s signature] name output cert [cert...]\n",
            progname);
 }
 
 int main(int argc, char **argv)
 {
     X509 **cert;
-    UINTN name_len, data_len, sig_len, descriptor_len;
-    uint8_t *name, *data, *sig, *descriptor;
+    UINTN name_len, data_len, signable_len, sig_len, descriptor_len;
+    uint8_t *name, *data, *signable_data, *sig, *descriptor;
     const EFI_GUID *guid, *vendor_guid;
     char *out_file;
     EFI_TIME timestamp;
@@ -241,10 +252,12 @@ int main(int argc, char **argv)
     EVP_PKEY *sign_key = NULL;
     X509 *sign_cert = NULL;
     BIO *bio;
-    FILE *out;
+    FILE *out, *signature = NULL;
     time_t t;
     struct tm *tm;
     int i, count;
+    bool timestamp_provided = false;
+    bool output_signable = false;
 
     ERR_load_crypto_strings();
     OpenSSL_add_all_digests();
@@ -252,7 +265,7 @@ int main(int argc, char **argv)
     ERR_clear_error();
 
     for (;;) {
-        int c = getopt(argc, argv, "c:k:h");
+        int c = getopt(argc, argv, "c:k:hot:s:");
 
         if (c == -1)
             break;
@@ -287,13 +300,27 @@ int main(int argc, char **argv)
         case 'h':
             usage(argv[0]);
             exit(0);
+        case 'o':
+            output_signable = true;
+            break;
+        case 't':
+            timestamp_provided = true;
+            t = (time_t)atol(optarg);
+            break;
+        case 's':
+            signature = fopen(optarg, "r");
+            if (!signature) {
+                printf("Failed to open '%s'\n", optarg);
+                exit(1);
+            }
+            break;
         default:
             usage(argv[0]);
             exit(1);
         }
     }
 
-    if ((sign_key && !sign_cert) || (!sign_key && sign_cert) ||
+    if ((sign_key && !sign_cert) || (sign_cert && !(sign_key || output_signable || (signature != NULL))) ||
             argc - optind < 3) {
         usage(argv[0]);
         exit(1);
@@ -354,7 +381,8 @@ int main(int argc, char **argv)
     }
 
     /* Initialize timestamp to current time (in UTC). */
-    time(&t);
+    if (!timestamp_provided)
+        time(&t);
     tm = gmtime(&t);
     if (!tm) {
          printf("gmtime() failed: %d, %s\n", errno, strerror(errno));
@@ -373,8 +401,24 @@ int main(int argc, char **argv)
     timestamp.Pad2 = 0;
 
     data = certs_to_sig_list(cert, count, &data_len, vendor_guid);
-    sig = sign_data(sign_cert, sign_key, name, name_len, guid, attr,
-                    &timestamp, data, data_len, &sig_len);
+    signable_data = create_signable_data(name, name_len, guid, attr, &timestamp,
+                                         data, data_len, &signable_len);
+    if (signature != NULL) {
+        fseek(signature, 0L, SEEK_END);
+        sig_len = ftell(signature);
+        fseek(signature, 0L, SEEK_SET);
+        sig = malloc(sig_len);
+        if (!sig) {
+            printf("Out of memory!\n");
+            exit(1);
+        }
+        if (fread(sig, 1, sig_len, signature) != sig_len) {
+            printf("Failed to read!\n");
+            exit(1);
+        }
+        fclose(signature);
+    } else
+        sig = sign_data(sign_cert, sign_key, signable_data, signable_len, &sig_len);
     descriptor = (uint8_t *)create_descriptor(sig_len, &timestamp, &descriptor_len);
 
     out = fopen(out_file, "w");
@@ -382,20 +426,28 @@ int main(int argc, char **argv)
         printf("Failed to open '%s'\n", out_file);
         exit(1);
     }
-    if (fwrite(descriptor, 1, descriptor_len, out) != descriptor_len) {
-        printf("Failed to write!\n");
-        exit(1);
-    }
-    if (fwrite(sig, 1, sig_len, out) != sig_len) {
-        printf("Failed to write!\n");
-        exit(1);
-    }
-    if (fwrite(data, 1, data_len, out) != data_len) {
-        printf("Failed to write!\n");
-        exit(1);
+    if (output_signable) {
+        if (fwrite(signable_data, 1, signable_len, out) != signable_len) {
+            printf("Failed to write!\n");
+            exit(1);
+        }
+    } else {
+        if (fwrite(descriptor, 1, descriptor_len, out) != descriptor_len) {
+            printf("Failed to write!\n");
+            exit(1);
+        }
+        if (fwrite(sig, 1, sig_len, out) != sig_len) {
+            printf("Failed to write!\n");
+            exit(1);
+        }
+        if (fwrite(data, 1, data_len, out) != data_len) {
+            printf("Failed to write!\n");
+            exit(1);
+        }
     }
     fclose(out);
 
+    free(signable_data);
     free(data);
     free(sig);
     free(descriptor);
