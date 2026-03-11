@@ -35,12 +35,15 @@
 #include "efi.h"
 #include "handler.h"
 
+#define barrier() asm volatile ("" ::: "memory")
+
 static inline enum command_t
 unserialize_command(uint8_t **ptr)
 {
     UINT32 data;
 
     memcpy(&data, *ptr, sizeof(data));
+    barrier();
     *ptr += sizeof data;
 
     return (enum command_t)data;
@@ -50,9 +53,11 @@ static inline void
 serialize_data(uint8_t **ptr, const uint8_t *data, UINTN data_len)
 {
     memcpy(*ptr, &data_len, sizeof(data_len));
+    barrier();
     *ptr += sizeof data_len;
     if (data_len) {
         memcpy(*ptr, data, data_len);
+        barrier();
         *ptr += data_len;
     }
 }
@@ -61,6 +66,7 @@ static inline void
 serialize_result(uint8_t **ptr, EFI_STATUS status)
 {
     memcpy(*ptr, &status, sizeof(status));
+    barrier();
     *ptr += sizeof status;
 }
 
@@ -68,6 +74,7 @@ static inline void
 serialize_guid(uint8_t **ptr, const EFI_GUID *guid)
 {
     memcpy(*ptr, guid, GUID_LEN);
+    barrier();
     *ptr += GUID_LEN;
 }
 
@@ -75,6 +82,7 @@ static inline void
 serialize_timestamp(uint8_t **ptr, EFI_TIME *timestamp)
 {
     memcpy(*ptr, timestamp, sizeof(*timestamp));
+    barrier();
     *ptr += sizeof(*timestamp);
 }
 
@@ -82,6 +90,7 @@ static inline void
 serialize_uintn(uint8_t **ptr, UINTN var)
 {
     memcpy(*ptr, &var, sizeof(var));
+    barrier();
     *ptr += sizeof var;
 }
 
@@ -89,6 +98,7 @@ static inline void
 serialize_uint32(uint8_t **ptr, UINT32 var)
 {
     memcpy(*ptr, &var, sizeof(var));
+    barrier();
     *ptr += sizeof var;
 }
 
@@ -96,6 +106,7 @@ static inline void
 serialize_uint64(uint8_t **ptr, UINT64 var)
 {
     memcpy(*ptr, &var, sizeof(var));
+    barrier();
     *ptr += sizeof var;
 }
 
@@ -105,6 +116,7 @@ unserialize_data(uint8_t **ptr, UINTN *len, UINTN limit)
     uint8_t *data;
 
     memcpy(len, *ptr, sizeof(*len));
+    barrier();
     *ptr += sizeof *len;
 
     if (*len > limit || *len == 0)
@@ -115,6 +127,7 @@ unserialize_data(uint8_t **ptr, UINTN *len, UINTN limit)
         return NULL;
 
     memcpy(data, *ptr, *len);
+    barrier();
     *ptr += *len;
 
     return data;
@@ -124,6 +137,7 @@ static inline void
 unserialize_data_inplace(uint8_t **ptr, uint8_t *buf, UINTN len)
 {
     memcpy(buf, *ptr, len);
+    barrier();
     *ptr += len;
 }
 
@@ -137,6 +151,7 @@ static inline void
 unserialize_timestamp(uint8_t **ptr, EFI_TIME *timestamp)
 {
     memcpy(timestamp, *ptr, sizeof(*timestamp));
+    barrier();
     *ptr += sizeof(*timestamp);
 }
 
@@ -146,6 +161,7 @@ unserialize_uintn(uint8_t **ptr)
     UINTN ret;
 
     memcpy(&ret, *ptr, sizeof(ret));
+    barrier();
     *ptr += sizeof ret;
 
     return ret;
@@ -157,6 +173,7 @@ unserialize_boolean(uint8_t **ptr)
     BOOLEAN ret;
 
     memcpy(&ret, *ptr, sizeof(ret));
+    barrier();
     *ptr += sizeof ret;
 
     return ret;
@@ -168,6 +185,7 @@ unserialize_uint32(uint8_t **ptr)
     UINT32 ret;
 
     memcpy(&ret, *ptr, sizeof(ret));
+    barrier();
     *ptr += sizeof ret;
 
     return ret;
