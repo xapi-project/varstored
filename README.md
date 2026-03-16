@@ -59,6 +59,68 @@ $ cp varstored /usr/sbin
 $ cp tools/varstore-{get,set,ls,rm,sb-state} /usr/bin
 ```
 
+create-auth
+-----------
+
+The `create-auth` utility prepares authenticated variable update files ("auth"
+files) used to populate PK, KEK, db, and dbx.
+
+Options:
+
+* `-k <key>` - Private key (PEM) used to sign the auth data
+* `-c <cert>` - Certificate (PEM) corresponding to the signing key
+* `-t <seconds>` - Timestamp as seconds since epoch (defaults to current time)
+* `-s <signature>` - Pre-computed signature file (alternative to `-k`)
+* `-o` - Output a file suitable for external signing instead of the signed auth
+* `-g <guid>` - Vendor GUID in RFC-4122 format
+  (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`). If not provided, defaults to the
+  Citrix GUID for PK and the Microsoft GUID for KEK/db/dbx.
+
+The GUID is stored using mixed-endian encoding per the EFI specification:
+
+| Field | Size    | Endianness    |
+|-------|---------|---------------|
+| Data1 | 4 bytes | little-endian |
+| Data2 | 2 bytes | little-endian |
+| Data3 | 2 bytes | little-endian |
+| Data4 | 8 bytes | big-endian    |
+
+For example, the GUID `aabbccdd-eeff-gghh-iijj-kkllmmnnoopp` is stored as
+`dd cc bb aa ff ee hh gg ii jj kk ll mm nn oo pp`.
+
+### Inline signing
+
+When both `-k` and `-c` are provided, `create-auth` signs the data directly:
+
+```
+./create-auth -k PK.key -c PK.pem PK PK.auth PK.pem
+```
+
+### External signing
+
+The `-o`, `-s`, and `-t` options support a workflow where signing is performed
+externally (e.g. by an HSM or a separate signing service). The same `-t`
+timestamp value must be used for all three steps.
+
+1. Generate a signable file:
+
+```
+./create-auth -o -t <timestamp> -c PK.pem PK PK.tosign PK.pem
+```
+
+2. Sign it externally, e.g. with OpenSSL:
+
+```
+openssl smime -sign -binary -in PK.tosign -out PK.sig \
+    -signer PK.pem -inkey PK.key -outform DER -md sha256 -noattr
+```
+
+3. Import the detached signature to produce the `.auth` file:
+
+```
+./create-auth -s PK.sig -t <timestamp> -c PK.pem PK PK.auth PK.pem
+```
+
 Contributing
 ------------
 Please send a pull request to https://github.com/xapi-project/varstored
