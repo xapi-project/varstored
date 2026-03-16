@@ -233,10 +233,60 @@ create_descriptor(UINTN sig_len, EFI_TIME *timestamp, UINTN *descriptor_len)
     return d;
 }
 
+/*
+ * Parse a GUID string in RFC-4122 format (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+ * into an EFI_GUID. The EFI_GUID uses mixed-endian encoding:
+ *   Data1 (4 bytes) little-endian
+ *   Data2 (2 bytes) little-endian
+ *   Data3 (2 bytes) little-endian
+ *   Data4 (8 bytes) big-endian
+ *   https://uefi.org/specs/UEFI/2.10/Apx_A_GUID_and_Time_Formats.html
+ * Returns true on success, false on failure.
+ */
+static bool
+parse_guid(const char *str, EFI_GUID *guid)
+{
+    unsigned int data1, data2, data3;
+    unsigned int data4[8];
+    unsigned int i;
+    int ret;
+
+    if (strlen(str) != 36)
+        return false;
+
+    ret = sscanf(str, "%8x-%4x-%4x-%2x%2x-%2x%2x%2x%2x%2x%2x",
+                 &data1, &data2, &data3,
+                 &data4[0], &data4[1], &data4[2], &data4[3],
+                 &data4[4], &data4[5], &data4[6], &data4[7]);
+    if (ret != 11)
+        return false;
+
+    /* Data1: 4 bytes, little-endian */
+    guid->data[0] = data1 & 0xff;
+    guid->data[1] = (data1 >> 8) & 0xff;
+    guid->data[2] = (data1 >> 16) & 0xff;
+    guid->data[3] = (data1 >> 24) & 0xff;
+
+    /* Data2: 2 bytes, little-endian */
+    guid->data[4] = data2 & 0xff;
+    guid->data[5] = (data2 >> 8) & 0xff;
+
+    /* Data3: 2 bytes, little-endian */
+    guid->data[6] = data3 & 0xff;
+    guid->data[7] = (data3 >> 8) & 0xff;
+
+    /* Data4: 8 bytes, big-endian */
+    for (i = 0; i < 8; i++)
+        guid->data[8 + i] = data4[i];
+
+    return true;
+}
+
 static void
 usage(const char *progname)
 {
-    printf("usage: %s [-o] [-t <seconds>] [-k <key>] [-c cert] [-s signature] name output cert [cert...]\n",
+    printf("usage: %s [-o] [-t <seconds>] [-k <key>] [-c cert] [-s signature]\n"
+           "       [-g <guid>] name output cert [cert...]\n",
            progname);
 }
 
@@ -246,6 +296,7 @@ int main(int argc, char **argv)
     UINTN name_len, data_len, signable_len, sig_len, descriptor_len;
     uint8_t *name, *data, *signable_data, *sig, *descriptor;
     const EFI_GUID *guid, *vendor_guid;
+    EFI_GUID custom_vendor_guid;
     char *out_file;
     EFI_TIME timestamp;
     UINT32 attr = ATTR_BRNV | EFI_VARIABLE_TIME_BASED_AUTHENTICATED_WRITE_ACCESS;
@@ -258,6 +309,7 @@ int main(int argc, char **argv)
     int i, count;
     bool timestamp_provided = false;
     bool output_signable = false;
+    bool custom_guid_provided = false;
 
     ERR_load_crypto_strings();
     OpenSSL_add_all_digests();
@@ -265,7 +317,7 @@ int main(int argc, char **argv)
     ERR_clear_error();
 
     for (;;) {
-        int c = getopt(argc, argv, "c:k:hot:s:");
+        int c = getopt(argc, argv, "c:g:k:hot:s:");
 
         if (c == -1)
             break;
@@ -296,6 +348,13 @@ int main(int argc, char **argv)
                 exit(1);
             }
             BIO_free_all(bio);
+            break;
+        case 'g':
+            if (!parse_guid(optarg, &custom_vendor_guid)) {
+                printf("Failed to parse GUID: %s\n", optarg);
+                exit(1);
+            }
+            custom_guid_provided = true;
             break;
         case 'h':
             usage(argv[0]);
@@ -335,7 +394,9 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    if (!strcmp(argv[optind], "PK"))
+    if (custom_guid_provided)
+        vendor_guid = &custom_vendor_guid;
+    else if (!strcmp(argv[optind], "PK"))
         vendor_guid = &citrix_guid;
     else
         vendor_guid = &microsoft_guid;
