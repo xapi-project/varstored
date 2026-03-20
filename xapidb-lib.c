@@ -97,6 +97,7 @@
         "<param><value><string>%s</string></value></param>" \
         "<param><value><string>%s</string></value></param>" \
         "<param><value><string>%s</string></value></param>" \
+        "<param><value><boolean>%d</boolean></value></param>" \
       "</params>" \
     "</methodCall>"
 
@@ -129,6 +130,16 @@
     "<methodCall>" \
       "<methodName>session.logout</methodName>" \
       "<params>" \
+        "<param><value><string>%s</string></value></param>" \
+      "</params>" \
+    "</methodCall>"
+
+#define VM_GET_SECUREBOOT_CERTIFICATES_STATE_CALL \
+    "<?xml version='1.0'?>" \
+    "<methodCall>" \
+      "<methodName>VM.get_secureboot_certificates_state</methodName>" \
+      "<params>" \
+        "<param><value><string>%s</string></value></param>" \
         "<param><value><string>%s</string></value></param>" \
       "</params>" \
     "</methodCall>"
@@ -380,11 +391,12 @@ out:
 }
 
 static bool
-send_to_xapi(char *uuid, char *data)
+send_to_xapi(char *uuid, char *data, bool refresh)
 {
     int status;
     bool ret = false;
     char *session_ref = NULL, *response = NULL;
+    int cert_state_refresh = refresh ? 1 : 0;
 
     status = xmlrpc_call(&response, LOGIN_CALL);
     if (status != HTTP_STATUS_OK)
@@ -408,7 +420,9 @@ send_to_xapi(char *uuid, char *data)
         response = NULL;
     }
 
-    status = xmlrpc_call(&response, VM_SET_NVRAM_EFI_VARIABLES_CALL, session_ref, xapidb_vm_ref, data);
+    status = xmlrpc_call(&response,
+                         VM_SET_NVRAM_EFI_VARIABLES_CALL,
+                         session_ref, xapidb_vm_ref, data, cert_state_refresh);
     if (status != HTTP_STATUS_OK)
         goto out;
     if (!xmlrpc_process(response, NULL))
@@ -482,7 +496,7 @@ base64_encode(const uint8_t *buf, size_t len, char **out)
 }
 
 bool
-xapidb_set_variable(void)
+xapidb_set_variable(bool refresh)
 {
     uint8_t *buf;
     char *encoded;
@@ -523,7 +537,7 @@ xapidb_set_variable(void)
         last_time = time(NULL);
     }
 
-    ret = send_to_xapi(xapidb_arg_uuid, encoded);
+    ret = send_to_xapi(xapidb_arg_uuid, encoded, refresh);
     free(encoded);
 
     return ret;
@@ -750,6 +764,71 @@ out:
     return ret;
 }
 
+static bool
+get_secureboot_certificates_state(const char *uuid, char **state_out)
+{
+    int status;
+    bool ret = false;
+    char *session_ref = NULL, *response = NULL;
+
+    *state_out = NULL;
+
+    status = xmlrpc_call(&response, LOGIN_CALL);
+    if (status != HTTP_STATUS_OK)
+        goto out;
+    if (!xmlrpc_process(response, &session_ref))
+        goto out;
+    free(response);
+    response = NULL;
+
+    if (!xapidb_vm_ref) {
+        status = xmlrpc_call(&response, VM_GET_BY_UUID_CALL, session_ref, uuid);
+        if (status != HTTP_STATUS_OK)
+            goto out;
+        if (!xmlrpc_process(response, &xapidb_vm_ref))
+            goto out;
+        free(response);
+        response = NULL;
+    }
+
+    status = xmlrpc_call(&response,
+                         VM_GET_SECUREBOOT_CERTIFICATES_STATE_CALL,
+                         session_ref, xapidb_vm_ref);
+    if (status != HTTP_STATUS_OK)
+        goto out;
+    if (!xmlrpc_process(response, state_out))
+        goto out;
+    free(response);
+    response = NULL;
+
+    status = xmlrpc_call(&response, LOGOUT_CALL, session_ref);
+    if (status != HTTP_STATUS_OK || !xmlrpc_process(response, NULL))
+        goto out;
+
+    ret = true;
+
+out:
+    free(session_ref);
+    free(response);
+    return ret;
+}
+
+bool
+secureboot_certificates_state_is_update_on_boot(const char *uuid)
+{
+    char *state = NULL;
+    bool result = false;
+
+    if (!get_secureboot_certificates_state(uuid, &state))
+        return false;
+
+    if (state && !strcmp(state, SECUREBOOT_CERT_STATE_UPDATE_ON_BOOT))
+        result = true;
+
+    free(state);
+    return result;
+}
+
 enum backend_init_status
 xapidb_init(void)
 {
@@ -805,7 +884,14 @@ xapidb_init(void)
     ret = xapidb_parse_blob(&ptr, total);
     free(buf);
 
-    return ret ? BACKEND_INIT_SUCCESS : BACKEND_INIT_FAILURE;
+    if (!ret)
+        return BACKEND_INIT_FAILURE;
+
+    if (xapidb_arg_uuid &&
+            secureboot_certificates_state_is_update_on_boot(xapidb_arg_uuid))
+        return BACKEND_INIT_CERT_UPDATE;
+
+    return BACKEND_INIT_SUCCESS;
 }
 
 bool

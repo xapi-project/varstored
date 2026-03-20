@@ -69,6 +69,7 @@
 #include <mor.h>
 #include <ppi.h>
 #include <backend.h>
+#include <xapidb.h>
 
 #include "io_port.h"
 #include "option.h"
@@ -528,6 +529,18 @@ varstored_initialize(domid_t domid)
             if (!setup_keys()) {
                 ERR("Failed to setup keys\n");
                 goto err;
+            }
+        }
+
+        if (status == BACKEND_INIT_CERT_UPDATE) {
+            if (check_local_auth_updated(0)) {
+                INFO("Updating Secure Boot certificates\n");
+                if (!setup_keys()) {
+                    ERR("Failed to update certificates\n");
+                    goto err;
+                }
+            } else {
+                INFO("Certificate update requested but local auth files are not updated\n");
             }
         }
     }
