@@ -95,4 +95,20 @@ extern bool secure_boot_enable;
 extern bool auth_enforce;
 extern bool persistent;
 
+#define MAX_CERT_SUBJECT 256
+#define MAX_CERTS_IN_SIGLIST 32
+
+struct cert_info {
+    char subject[MAX_CERT_SUBJECT];
+    int not_before_year;
+    int not_before_month;
+    int not_before_day;
+    int not_after_year;
+    int not_after_month;
+    int not_after_day;
+};
+
+enum certificate_current_state check_nvram_certs_state(int verbose);
+bool check_local_auth_updated(int verbose);
+
 #endif

@@ -35,6 +35,13 @@ enum backend_init_status {
     BACKEND_INIT_FAILURE,
     BACKEND_INIT_SUCCESS,
     BACKEND_INIT_FIRSTBOOT,
+    BACKEND_INIT_CERT_UPDATE,
+};
+
+enum certificate_current_state {
+    CERT_STATE_UNKNOWN,
+    CERT_STATE_2023, /* both 2011 and 2023 certificates */
+    CERT_STATE_2011, /* only 2011 certificate */
 };
 
 struct backend {
@@ -49,7 +56,7 @@ struct backend {
     /* Called to resume from previously saved state. */
     bool (*resume)(void);
     /* Called when set_variable updates an NV variable. */
-    bool (*set_variable)(void);
+    bool (*set_variable)(bool refresh);
     /* Called when a Secure Boot verification failure occurs. */
     bool (*sb_notify)(void);
 };
