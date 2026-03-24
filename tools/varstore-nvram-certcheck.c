@@ -35,6 +35,7 @@
 #include <backend.h>
 #include <debug.h>
 #include <depriv.h>
+#include <xapidb.h>
 #include <handler.h>
 
 #include "tool-lib.h"
@@ -46,8 +47,8 @@ static const struct {
     enum certificate_current_state state;
     const char *name;
 } cert_state_map[] = {
-    { CERT_STATE_2023,   "certificate-2023" },
-    { CERT_STATE_2011,   "certificate-2011" },
+    { CERT_STATE_UPDATE_OK,       "update_ok" },
+    { CERT_STATE_UPDATE_REQUIRED, "update_required" },
     { CERT_STATE_UNKNOWN, "unknown" },
 };
 
@@ -67,24 +68,28 @@ cert_state_to_string(enum certificate_current_state state)
 static void
 usage(const char *progname)
 {
-    printf("usage: %s [-hv] [depriv options] <vm-uuid>\n\n", progname);
+    printf("usage: %s [-hvs] [depriv options] <vm-uuid>\n\n", progname);
     printf("Checks the VM's NVRAM Secure Boot certificate status.\n"
            "Outputs one of:\n"
-           "  1. certificate-2023  - certificates include 2023 certs\n"
-           "  2. certificate-2011  - certificates only contain 2011 certs\n"
-           "  3. unknown\n");
+           "  1. upadte_ok        - certificates include latest certs\n"
+           "  2. update_required  - certificates only contain legacy certs\n"
+           "  3. unknown\n"
+           "\n"
+           "  [-f] - if latest certs are present, flag secureboot_certificates_state to 'ok'\n"
+           "  [-v] - enables debug logging\n");
     print_depriv_options();
-    printf("  [-v] - enables debug logging\n");
 }
 
 int main(int argc, char **argv)
 {
     int verbose = 0;
+    int opt_flag = 0;
+    enum certificate_current_state state;
 
     DEPRIV_VARS
 
     for (;;) {
-        int c = getopt(argc, argv, "hv" DEPRIV_OPTS);
+        int c = getopt(argc, argv, "hvf" DEPRIV_OPTS);
 
         if (c == -1)
             break;
@@ -96,6 +101,9 @@ int main(int argc, char **argv)
             exit(0);
         case 'v':
             verbose = 1;
+            break;
+        case 'f':
+            opt_flag = 1;
             break;
         default:
             usage(argv[0]);
@@ -110,16 +118,36 @@ int main(int argc, char **argv)
 
     db->parse_arg("uuid", argv[optind]);
 
-    if (opt_socket)
-        db->parse_arg("socket", opt_socket);
-
     if (!drop_privileges(opt_chroot, opt_depriv, opt_gid, opt_uid))
         exit(1);
 
     if (!tool_init())
         exit(1);
 
-    printf("%s\n", cert_state_to_string(check_nvram_certs_state(verbose)));
+    state = check_nvram_certs_state(verbose);
+    printf("%s\n", cert_state_to_string(state));
+
+    if (opt_flag) {
+        if (state == CERT_STATE_UPDATE_OK) {
+            if (!xapidb_set_secureboot_certs_state(xapidb_get_uuid(),
+                                                SECUREBOOT_CERT_STATE_OK)) {
+                fprintf(stderr, "Failed to set secureboot_certificates_state\n");
+                exit(1);
+            } else {
+                fprintf(stderr, "Now secureboot_certificates_state is ok\n");
+            }
+        } else if (state == CERT_STATE_UPDATE_REQUIRED) {
+            if (!xapidb_set_secureboot_certs_state(xapidb_get_uuid(),
+                                                SECUREBOOT_CERT_STATE_UPDATE_AVAILABLE)) {
+                fprintf(stderr, "Failed to set secureboot_certificates_state\n");
+                exit(1);
+            } else {
+                fprintf(stderr, "Now secureboot_certificates_state is update_available\n");
+            }
+        } else {
+            fprintf(stderr, "secureboot_certificates_state is unknown\n");
+        }
+    }
 
     return 0;
 }

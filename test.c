@@ -192,6 +192,14 @@ static dstring *alloc_dstring(const char *string)
     return dstr;
 }
 
+static void fill_dstring(dstring *dstr, uint16_t value)
+{
+    size_t i;
+
+    for (i = 0; i < dstr->length; i++)
+        dstr->data[i] = value;
+}
+
 static void free_dstring(dstring *d)
 {
     if (d)
@@ -421,7 +429,8 @@ static void call_set_variable(const dstring *name, const EFI_GUID *guid,
     serialize_guid(&ptr, guid);
     serialize_data(&ptr, data, data_len);
     serialize_uint32(&ptr, attr);
-    *ptr++ = at_runtime;
+    serialize_boolean(&ptr, 0);
+    serialize_boolean(&ptr, at_runtime);
 
     dispatch_command(buf);
 }
@@ -756,7 +765,7 @@ static void test_get_variable_long_name(void)
 
     reset_vars();
     bigname = alloc_dstring_unset(NAME_LIMIT / sizeof(uint16_t) + 1);
-    memset(bigname->data, 42, dstring_data_size(bigname));
+    fill_dstring(bigname, 42);
 
     /* Test the maximum variable name length. */
     call_get_variable(bigname, &nullguid, BSIZ, 0);
@@ -880,7 +889,7 @@ static void test_query_variable_info(void)
      */
 
     longname = alloc_dstring_unset(VARIABLE_SIZE_OVERHEAD / sizeof(uint16_t));
-    memset(longname->data, 'a', dstring_data_size(longname));
+    fill_dstring(longname, 'a');
 
     /* Check the defined limits with no variables. */
     call_query_variable_info();
@@ -930,7 +939,7 @@ static void test_query_variable_info(void)
     g_assert_cmpuint(DATA_LIMIT, ==, unserialize_uintn(&ptr));
 
     /* Deleting a variable updates the limits correctly. */
-    sv_ok(longname, &tguid1, NULL, 0, ATTR_B);
+    sv_ok(longname, &tguid1, tdata1, sizeof(tdata1), 0);
     call_query_variable_info();
     ptr = buf;
     status = unserialize_uintn(&ptr);
@@ -963,7 +972,7 @@ static void test_get_next_variable_long_name(void)
 
     reset_vars();
     tmp_name = alloc_dstring_unset(NAME_LIMIT / sizeof(uint16_t) + 1);
-    memset(tmp_name->data, 42, dstring_data_size(tmp_name));
+    fill_dstring(tmp_name, 42);
 
     /* Input name exceeds the limit */
     call_get_next_variable(BSIZ, tmp_name, &nullguid, 0);
@@ -2663,39 +2672,6 @@ static void build_siglist_from_pems(const char *pem1, const char *pem2,
     read_x509_list_into_CertList(list, out, out_len);
 }
 
-/* Test is_secureboot_key_variable: PK, KEK, db, dbx should return true */
-static void test_is_secureboot_key_variable(void)
-{
-    /* PK */
-    g_assert_true(is_secureboot_key_variable(
-        EFI_PLATFORM_KEY_NAME, sizeof(EFI_PLATFORM_KEY_NAME),
-        &gEfiGlobalVariableGuid));
-
-    /* KEK */
-    g_assert_true(is_secureboot_key_variable(
-        EFI_KEY_EXCHANGE_KEY_NAME, sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
-        &gEfiGlobalVariableGuid));
-
-    /* db */
-    g_assert_true(is_secureboot_key_variable(
-        EFI_IMAGE_SECURITY_DATABASE, sizeof(EFI_IMAGE_SECURITY_DATABASE),
-        &gEfiImageSecurityDatabaseGuid));
-
-    /* dbx */
-    g_assert_true(is_secureboot_key_variable(
-        EFI_IMAGE_SECURITY_DATABASE1, sizeof(EFI_IMAGE_SECURITY_DATABASE1),
-        &gEfiImageSecurityDatabaseGuid));
-
-    /* Non-SB variable should return false */
-    g_assert_false(is_secureboot_key_variable(
-        (const uint8_t *)tname1->data, dstring_data_size(tname1),
-        &tguid1));
-
-    /* Wrong GUID for PK name should return false */
-    g_assert_false(is_secureboot_key_variable(
-        EFI_PLATFORM_KEY_NAME, sizeof(EFI_PLATFORM_KEY_NAME),
-        &tguid1));
-}
 
 /* Test count_x509_certs_in_siglist with a single 2011 certificate */
 static void test_count_certs_single_2011(void)
@@ -2767,8 +2743,8 @@ static void test_count_certs_empty(void)
     g_assert_cmpint(count, ==, 0);
 }
 
-/* Test siglist_has_2023_cert returns true for 2023 cert */
-static void test_siglist_has_2023_cert_true(void)
+/* Test siglist_has_latest_cert returns true for 2023 cert */
+static void test_siglist_has_latest_cert_true(void)
 {
     EFI_SIGNATURE_LIST *siglist;
     size_t siglist_len;
@@ -2776,13 +2752,13 @@ static void test_siglist_has_2023_cert_true(void)
     build_siglist_from_pem("certs/ms-kek-ca-2023.pem",
                            &siglist, &siglist_len);
 
-    g_assert_true(siglist_has_2023_cert((uint8_t *)siglist, siglist_len, 0));
+    g_assert_true(siglist_has_latest_cert((uint8_t *)siglist, siglist_len, 0));
 
     free(siglist);
 }
 
-/* Test siglist_has_2023_cert returns false for 2011 cert */
-static void test_siglist_has_2023_cert_false(void)
+/* Test siglist_has_latest_cert returns false for 2011 cert */
+static void test_siglist_has_latest_cert_false(void)
 {
     EFI_SIGNATURE_LIST *siglist;
     size_t siglist_len;
@@ -2790,13 +2766,13 @@ static void test_siglist_has_2023_cert_false(void)
     build_siglist_from_pem("certs/MicCorKEKCA2011_2011-06-24.pem",
                            &siglist, &siglist_len);
 
-    g_assert_false(siglist_has_2023_cert((uint8_t *)siglist, siglist_len, 0));
+    g_assert_false(siglist_has_latest_cert((uint8_t *)siglist, siglist_len, 0));
 
     free(siglist);
 }
 
-/* Test siglist_has_2023_cert returns true when both 2011 and 2023 present */
-static void test_siglist_has_2023_cert_combined(void)
+/* Test siglist_has_latest_cert returns true when both 2011 and 2023 present */
+static void test_siglist_has_latest_cert_combined(void)
 {
     EFI_SIGNATURE_LIST *siglist;
     size_t siglist_len;
@@ -2805,7 +2781,7 @@ static void test_siglist_has_2023_cert_combined(void)
                             "certs/ms-kek-ca-2023.pem",
                             &siglist, &siglist_len);
 
-    g_assert_true(siglist_has_2023_cert((uint8_t *)siglist, siglist_len, 0));
+    g_assert_true(siglist_has_latest_cert((uint8_t *)siglist, siglist_len, 0));
 
     free(siglist);
 }
@@ -2822,10 +2798,10 @@ static void test_check_nvram_certs_state_no_kek(void)
 }
 
 /*
- * Test check_nvram_certs_state returns CERT_STATE_2011 when only a single
+ * Test check_nvram_certs_state returns CERT_STATE_UPDATE_REQUIRED when only a single
  * 2011 cert is in KEK.
  */
-static void test_check_nvram_certs_state_2011(void)
+static void test_check_nvram_certs_state_update_required(void)
 {
     EFI_SIGNATURE_LIST *siglist;
     size_t siglist_len;
@@ -2843,17 +2819,17 @@ static void test_check_nvram_certs_state_2011(void)
                                   ATTR_BRNV);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
 
-    g_assert_cmpint(check_nvram_certs_state(0), ==, CERT_STATE_2011);
+    g_assert_cmpint(check_nvram_certs_state(0), ==, CERT_STATE_UPDATE_REQUIRED);
 
     free(siglist);
     reset_vars();
 }
 
 /*
- * Test check_nvram_certs_state returns CERT_STATE_2023 when both 2011
+ * Test check_nvram_certs_state returns CERT_STATE_UPDATE_OK when both 2011
  * and 2023 certs are in KEK.
  */
-static void test_check_nvram_certs_state_2023(void)
+static void test_check_nvram_certs_state_update_ok(void)
 {
     EFI_SIGNATURE_LIST *siglist;
     size_t siglist_len;
@@ -2872,7 +2848,7 @@ static void test_check_nvram_certs_state_2023(void)
                                   ATTR_BRNV);
     g_assert_cmpuint(status, ==, EFI_SUCCESS);
 
-    g_assert_cmpint(check_nvram_certs_state(0), ==, CERT_STATE_2023);
+    g_assert_cmpint(check_nvram_certs_state(0), ==, CERT_STATE_UPDATE_OK);
 
     free(siglist);
     reset_vars();
@@ -2887,62 +2863,118 @@ static void test_check_payload_certs_state_empty(void)
 }
 
 /*
- * Test check_payload_certs_state returns CERT_STATE_2011 when only a single
- * 2011 cert siglist is provided.
+ * Test check_payload_certs_state returns CERT_STATE_UPDATE_REQUIRED when the NVRAM blob
+ * contains only a single 2011 cert in KEK.
  */
-static void test_check_payload_certs_state_2011(void)
+static void test_check_payload_certs_state_update_required(void)
 {
     EFI_SIGNATURE_LIST *siglist;
     size_t siglist_len;
+    uint8_t *buf;
+    size_t buf_len;
+    char *encoded;
+    EFI_STATUS status;
+
+    reset_vars();
 
     build_siglist_from_pem("certs/MicCorKEKCA2011_2011-06-24.pem",
                            &siglist, &siglist_len);
 
-    g_assert_cmpint(check_payload_certs_state((uint8_t *)siglist, siglist_len, 0),
-                    ==, CERT_STATE_2011);
-
+    status = internal_set_variable(EFI_KEY_EXCHANGE_KEY_NAME,
+                                   sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
+                                   &gEfiGlobalVariableGuid,
+                                   (uint8_t *)siglist, siglist_len,
+                                   ATTR_BRNV);
+    g_assert_cmpuint(status, ==, EFI_SUCCESS);
     free(siglist);
+
+    g_assert_true(xapidb_serialize_variables(&buf, &buf_len, true));
+    g_assert_true(base64_encode(buf, buf_len, &encoded));
+    free(buf);
+
+    g_assert_cmpint(check_payload_certs_state((uint8_t *)encoded, strlen(encoded), 0),
+                    ==, CERT_STATE_UPDATE_REQUIRED);
+
+    free(encoded);
+    reset_vars();
 }
 
 /*
- * Test check_payload_certs_state returns CERT_STATE_2023 when both 2011
- * and 2023 certs are in the siglist.
+ * Test check_payload_certs_state returns CERT_STATE_UPDATE_OK when the NVRAM blob
+ * contains both 2011 and 2023 certs in KEK.
  */
-static void test_check_payload_certs_state_2023(void)
+static void test_check_payload_certs_state_update_ok(void)
 {
     EFI_SIGNATURE_LIST *siglist;
     size_t siglist_len;
+    uint8_t *buf;
+    size_t buf_len;
+    char *encoded;
+    EFI_STATUS status;
+
+    reset_vars();
 
     build_siglist_from_pems("certs/MicCorKEKCA2011_2011-06-24.pem",
                             "certs/ms-kek-ca-2023.pem",
                             &siglist, &siglist_len);
 
-    g_assert_cmpint(check_payload_certs_state((uint8_t *)siglist, siglist_len, 0),
-                    ==, CERT_STATE_2023);
-
+    status = internal_set_variable(EFI_KEY_EXCHANGE_KEY_NAME,
+                                   sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
+                                   &gEfiGlobalVariableGuid,
+                                   (uint8_t *)siglist, siglist_len,
+                                   ATTR_BRNV);
+    g_assert_cmpuint(status, ==, EFI_SUCCESS);
     free(siglist);
+
+    g_assert_true(xapidb_serialize_variables(&buf, &buf_len, true));
+    g_assert_true(base64_encode(buf, buf_len, &encoded));
+    free(buf);
+
+    g_assert_cmpint(check_payload_certs_state((uint8_t *)encoded, strlen(encoded), 0),
+                    ==, CERT_STATE_UPDATE_OK);
+
+    free(encoded);
+    reset_vars();
 }
 
 /*
- * Test check_payload_certs_state returns CERT_STATE_UNKNOWN when only a
- * single 2023 cert is present (count == 1 but not a 2011 cert).
+ * Test check_payload_certs_state returns CERT_STATE_UNKNOWN when the NVRAM
+ * blob contains only a single 2023 cert in KEK (count == 1 but not a 2011 cert).
  */
-static void test_check_payload_certs_state_single_2023(void)
+static void test_check_payload_certs_state_single_update_ok(void)
 {
     EFI_SIGNATURE_LIST *siglist;
     size_t siglist_len;
+    uint8_t *buf;
+    size_t buf_len;
+    char *encoded;
+    EFI_STATUS status;
+
+    reset_vars();
 
     build_siglist_from_pem("certs/ms-kek-ca-2023.pem",
                            &siglist, &siglist_len);
 
-    g_assert_cmpint(check_payload_certs_state((uint8_t *)siglist, siglist_len, 0),
+    status = internal_set_variable(EFI_KEY_EXCHANGE_KEY_NAME,
+                                   sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
+                                   &gEfiGlobalVariableGuid,
+                                   (uint8_t *)siglist, siglist_len,
+                                   ATTR_BRNV);
+    g_assert_cmpuint(status, ==, EFI_SUCCESS);
+    free(siglist);
+
+    g_assert_true(xapidb_serialize_variables(&buf, &buf_len, true));
+    g_assert_true(base64_encode(buf, buf_len, &encoded));
+    free(buf);
+
+    g_assert_cmpint(check_payload_certs_state((uint8_t *)encoded, strlen(encoded), 0),
                     ==, CERT_STATE_UNKNOWN);
 
-    free(siglist);
+    free(encoded);
+    reset_vars();
 }
 
 /*
- * The format is: EFI_TIME (zeroed) + WIN_CERTIFICATE header + payload.
  * The caller must free the returned buffer.
  */
 static uint8_t *
@@ -3118,7 +3150,8 @@ start_mock_xapi_server(const char *cert_state)
 
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, mock_socket_path, sizeof(addr.sun_path) - 1);
+    assert(strlen(mock_socket_path) < sizeof(addr.sun_path));
+    memcpy(addr.sun_path, mock_socket_path, strlen(mock_socket_path) + 1);
     assert(bind(server_fd, (struct sockaddr *)&addr, sizeof(addr)) == 0);
     assert(listen(server_fd, 5) == 0);
 
@@ -3332,8 +3365,6 @@ int main(int argc, char **argv)
     g_test_add_func("/test/secure_set_variable/DBT/usermode",
                     test_secure_set_dbt_usermode);
 
-    g_test_add_func("/test/cert_update/is_secureboot_key_variable",
-                    test_is_secureboot_key_variable);
     g_test_add_func("/test/cert_update/count_certs_single_2011",
                     test_count_certs_single_2011);
     g_test_add_func("/test/cert_update/count_certs_single_2023",
@@ -3342,26 +3373,26 @@ int main(int argc, char **argv)
                     test_count_certs_combined);
     g_test_add_func("/test/cert_update/count_certs_empty",
                     test_count_certs_empty);
-    g_test_add_func("/test/cert_update/siglist_has_2023_cert/true",
-                    test_siglist_has_2023_cert_true);
-    g_test_add_func("/test/cert_update/siglist_has_2023_cert/false",
-                    test_siglist_has_2023_cert_false);
-    g_test_add_func("/test/cert_update/siglist_has_2023_cert/combined",
-                    test_siglist_has_2023_cert_combined);
+    g_test_add_func("/test/cert_update/siglist_has_latest_cert/true",
+                    test_siglist_has_latest_cert_true);
+    g_test_add_func("/test/cert_update/siglist_has_latest_cert/false",
+                    test_siglist_has_latest_cert_false);
+    g_test_add_func("/test/cert_update/siglist_has_latest_cert/combined",
+                    test_siglist_has_latest_cert_combined);
     g_test_add_func("/test/cert_update/check_nvram_certs_state/no_kek",
                     test_check_nvram_certs_state_no_kek);
-    g_test_add_func("/test/cert_update/check_nvram_certs_state/2011",
-                    test_check_nvram_certs_state_2011);
-    g_test_add_func("/test/cert_update/check_nvram_certs_state/2023",
-                    test_check_nvram_certs_state_2023);
+    g_test_add_func("/test/cert_update/check_nvram_certs_state/update_required",
+                    test_check_nvram_certs_state_update_required);
+    g_test_add_func("/test/cert_update/check_nvram_certs_state/update_ok",
+                    test_check_nvram_certs_state_update_ok);
     g_test_add_func("/test/cert_update/check_payload_certs_state/empty",
                     test_check_payload_certs_state_empty);
-    g_test_add_func("/test/cert_update/check_payload_certs_state/2011",
-                    test_check_payload_certs_state_2011);
-    g_test_add_func("/test/cert_update/check_payload_certs_state/2023",
-                    test_check_payload_certs_state_2023);
-    g_test_add_func("/test/cert_update/check_payload_certs_state/single_2023",
-                    test_check_payload_certs_state_single_2023);
+    g_test_add_func("/test/cert_update/check_payload_certs_state/update_required",
+                    test_check_payload_certs_state_update_required);
+    g_test_add_func("/test/cert_update/check_payload_certs_state/update_ok",
+                    test_check_payload_certs_state_update_ok);
+    g_test_add_func("/test/cert_update/check_payload_certs_state/single_update_ok",
+                    test_check_payload_certs_state_single_update_ok);
     g_test_add_func("/test/cert_update/check_local_auth_updated/no_data",
                     test_check_local_auth_updated_no_data);
     g_test_add_func("/test/cert_update/check_local_auth_updated/2011",

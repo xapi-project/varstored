@@ -50,9 +50,9 @@ usage(const char *progname)
            "(2023) Secure Boot certificates.\n"
            "Outputs one of:\n"
            "  updated      - KEK auth file contains 2023 certificates\n"
-           "  not-updated  - KEK auth file does not contain 2023 certificates\n");
+           "  not-updated  - KEK auth file does not contain 2023 certificates\n"
+           "  [-v] - enables debug logging\n");
     print_depriv_options();
-    printf("  [-v] - enables debug logging\n");
 }
 
 int main(int argc, char **argv)

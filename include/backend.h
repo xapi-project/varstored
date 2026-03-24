@@ -38,11 +38,15 @@ enum backend_init_status {
     BACKEND_INIT_CERT_UPDATE,
 };
 
+#define EXPIRE_YEAR 2026
+
 enum certificate_current_state {
     CERT_STATE_UNKNOWN,
-    CERT_STATE_2023, /* both 2011 and 2023 certificates */
-    CERT_STATE_2011, /* only 2011 certificate */
+    CERT_STATE_UPDATE_OK,       /* both 2011 and 2023 certificates */
+    CERT_STATE_UPDATE_REQUIRED, /* only 2011 certificate */
 };
+
+#define NOT_EXPIRE(s, e) ((s) <= EXPIRE_YEAR && EXPIRE_YEAR < (e))
 
 struct backend {
     /* Called to handle arguments specific to the backend. */

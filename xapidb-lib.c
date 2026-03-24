@@ -45,6 +45,7 @@
 #include <openssl/evp.h>
 
 #include <debug.h>
+#include <guid.h>
 #include <efi.h>
 #include <handler.h>
 #include <mor.h>
@@ -144,12 +145,29 @@
       "</params>" \
     "</methodCall>"
 
+#define VM_SET_SECUREBOOT_CERTIFICATES_STATE_CALL \
+    "<?xml version='1.0'?>" \
+    "<methodCall>" \
+      "<methodName>VM.set_secureboot_certificates_state</methodName>" \
+      "<params>" \
+        "<param><value><string>%s</string></value></param>" \
+        "<param><value><string>%s</string></value></param>" \
+        "<param><value><string>%s</string></value></param>" \
+      "</params>" \
+    "</methodCall>"
+
 /* Path to the file containing the initial data from XAPI. */
 char *xapidb_arg_init;
 /* The VM's uuid. Used for saving to the XAPI db. */
 char *xapidb_arg_uuid;
 /* Path to the XAPI socket. */
 char *xapidb_arg_socket = "/var/lib/xcp/xapi";
+
+const char *
+xapidb_get_uuid(void)
+{
+    return xapidb_arg_uuid;
+}
 
 /*
  * The VM's opaqueref: cached for the lifetime of varstored.
@@ -391,12 +409,12 @@ out:
 }
 
 static bool
-send_to_xapi(char *uuid, char *data, bool refresh)
+send_to_xapi(char *uuid, char *data, bool update)
 {
     int status;
     bool ret = false;
     char *session_ref = NULL, *response = NULL;
-    int cert_state_refresh = refresh ? 1 : 0;
+    int cert_state_update = update ? 1 : 0;
 
     status = xmlrpc_call(&response, LOGIN_CALL);
     if (status != HTTP_STATUS_OK)
@@ -422,7 +440,7 @@ send_to_xapi(char *uuid, char *data, bool refresh)
 
     status = xmlrpc_call(&response,
                          VM_SET_NVRAM_EFI_VARIABLES_CALL,
-                         session_ref, xapidb_vm_ref, data, cert_state_refresh);
+                         session_ref, xapidb_vm_ref, data, cert_state_update);
     if (status != HTTP_STATUS_OK)
         goto out;
     if (!xmlrpc_process(response, NULL))
@@ -496,7 +514,7 @@ base64_encode(const uint8_t *buf, size_t len, char **out)
 }
 
 bool
-xapidb_set_variable(bool refresh)
+xapidb_set_variable(bool update)
 {
     uint8_t *buf;
     char *encoded;
@@ -537,7 +555,7 @@ xapidb_set_variable(bool refresh)
         last_time = time(NULL);
     }
 
-    ret = send_to_xapi(xapidb_arg_uuid, encoded, refresh);
+    ret = send_to_xapi(xapidb_arg_uuid, encoded, update);
     free(encoded);
 
     return ret;
@@ -826,6 +844,212 @@ secureboot_certificates_state_is_update_on_boot(const char *uuid)
         result = true;
 
     free(state);
+    return result;
+}
+
+/*
+ * Set the VM's secureboot_certificates_state to "ok" via XAPI XML-RPC.
+ * Returns true on success.
+ */
+bool
+xapidb_set_secureboot_certs_state(const char *uuid, char *state)
+{
+    int status;
+    bool ret = false;
+    char *session_ref = NULL, *response = NULL;
+
+    status = xmlrpc_call(&response, LOGIN_CALL);
+    if (status != HTTP_STATUS_OK)
+        goto out;
+    if (!xmlrpc_process(response, &session_ref))
+        goto out;
+    free(response);
+    response = NULL;
+
+    if (!xapidb_vm_ref) {
+        status = xmlrpc_call(&response, VM_GET_BY_UUID_CALL, session_ref, uuid);
+        if (status != HTTP_STATUS_OK)
+            goto out;
+        if (!xmlrpc_process(response, &xapidb_vm_ref))
+            goto out;
+        free(response);
+        response = NULL;
+    }
+
+    status = xmlrpc_call(&response,
+                         VM_SET_SECUREBOOT_CERTIFICATES_STATE_CALL,
+                         session_ref, xapidb_vm_ref, state);
+    if (status != HTTP_STATUS_OK)
+        goto out;
+    if (!xmlrpc_process(response, NULL))
+        goto out;
+    free(response);
+    response = NULL;
+
+    status = xmlrpc_call(&response, LOGOUT_CALL, session_ref);
+    if (status != HTTP_STATUS_OK || !xmlrpc_process(response, NULL))
+        goto out;
+
+    ret = true;
+
+out:
+    free(session_ref);
+    free(response);
+    return ret;
+}
+
+/*
+ * Scan a decoded NVRAM blob for the KEK variable without loading into the
+ * global var_list.  On success, sets *kek_data and *kek_data_len to point
+ * directly into buf (no allocation) and returns true.  Returns false if KEK
+ * is absent or the blob is malformed.
+ */
+static bool
+find_kek_in_blob(const uint8_t *buf, int total,
+                 uint8_t **kek_data_out, UINTN *kek_data_len_out)
+{
+    static const uint8_t kek_name[] = {'K', 0, 'E', 0, 'K', 0};
+    static const UINTN kek_name_len = sizeof(kek_name);
+    const uint8_t *ptr = buf;
+    const uint8_t *end = buf + total;
+    uint32_t version;
+    size_t count, i;
+
+    if (ptr + DB_HEADER_LEN > end)
+        return false;
+
+    if (memcmp(ptr, DB_MAGIC, strlen(DB_MAGIC)))
+        return false;
+    ptr += strlen(DB_MAGIC);
+
+    version = unserialize_uint32((uint8_t **)&ptr);
+    if (version > DB_VERSION)
+        return false;
+
+    count = unserialize_uintn((uint8_t **)&ptr);
+    if (count > MAX_VARIABLE_COUNT)
+        return false;
+    unserialize_uintn((uint8_t **)&ptr); /* data_len, unused */
+
+    if (version == 2) {
+        if (ptr + ANCILLARY_DATA_LEN_V2 > end)
+            return false;
+        ptr += ANCILLARY_DATA_LEN_V2;
+    }
+
+    for (i = 0; i < count; i++) {
+        UINTN name_len, data_len;
+        const uint8_t *name_ptr, *data_ptr;
+        EFI_GUID guid;
+        /* Per-variable fixed tail: attributes + timestamp + cert */
+        const UINTN tail = sizeof(UINT32) + sizeof(EFI_TIME) + SHA256_DIGEST_SIZE;
+
+        /* name length + name data */
+        if (ptr + sizeof(UINTN) > end)
+            return false;
+        name_len = unserialize_uintn((uint8_t **)&ptr);
+        if (name_len > NAME_LIMIT || ptr + name_len > end)
+            return false;
+        name_ptr = ptr;
+        ptr += name_len;
+
+        /* data length + data */
+        if (ptr + sizeof(UINTN) > end)
+            return false;
+        data_len = unserialize_uintn((uint8_t **)&ptr);
+        if (data_len > DATA_LIMIT || ptr + data_len > end)
+            return false;
+        data_ptr = ptr;
+        ptr += data_len;
+
+        /* guid */
+        if (ptr + GUID_LEN > end)
+            return false;
+        unserialize_guid((uint8_t **)&ptr, &guid);
+
+        /* attributes + timestamp + cert */
+        if (ptr + tail > end)
+            return false;
+        ptr += tail;
+
+        if (name_len == kek_name_len &&
+                !memcmp(name_ptr, kek_name, kek_name_len) &&
+                !memcmp(&guid, &gEfiGlobalVariableGuid, GUID_LEN)) {
+            *kek_data_out = (uint8_t *)data_ptr;
+            *kek_data_len_out = data_len;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/*
+ * Given the VM's NVRAM blob data, locate the KEK variable within it.
+ */
+bool
+xapidb_get_kekdata(const uint8_t *encoded, UINTN len, uint8_t **kek_data,
+                   UINTN *kek_data_len, int verbose)
+{
+    bool result = false;
+    uint8_t *buf = NULL;
+    BIO *bio = NULL, *b64 = NULL;
+    int max_len, n, total = 0;
+
+    if (!encoded) /* No NVRAM data yet (first boot) */
+        goto out;
+
+    max_len = strlen((const char*)encoded) * 3 / 4;
+    buf = malloc(max_len);
+    if (!buf) {
+        ERR("Failed to allocate memory\n");
+        goto out;
+    }
+
+    bio = BIO_new_mem_buf(encoded, -1);
+    if (!bio) {
+        ERR("Failed to create BIO\n");
+        goto out;
+    }
+    b64 = BIO_new(BIO_f_base64());
+    if (!b64) {
+        ERR("Failed to create BIO\n");
+        goto out;
+    }
+    BIO_push(b64, bio);
+    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
+
+    for (;;) {
+        n = BIO_read(b64, buf + total, max_len - total);
+        if (n <= 0)
+            break;
+        total += n;
+    }
+    BIO_free_all(b64);
+    b64 = NULL;
+    bio = NULL; /* freed by BIO_free_all */
+
+    {
+        uint8_t *kek_ptr;
+        UINTN kek_len;
+
+        if (!find_kek_in_blob(buf, total, &kek_ptr, &kek_len))
+            goto out;
+
+        *kek_data = malloc(kek_len);
+        if (!*kek_data) {
+            ERR("Failed to allocate memory\n");
+            goto out;
+        }
+        memcpy(*kek_data, kek_ptr, kek_len);
+        *kek_data_len = kek_len;
+    }
+
+    result = true;
+out:
+    if (b64)
+        BIO_free_all(b64);
+    free(buf);
     return result;
 }
 

@@ -79,6 +79,13 @@ serialize_timestamp(uint8_t **ptr, EFI_TIME *timestamp)
 }
 
 static inline void
+serialize_boolean(uint8_t **ptr, BOOLEAN var)
+{
+    memcpy(*ptr, &var, sizeof(var));
+    *ptr += sizeof var;
+}
+
+static inline void
 serialize_uintn(uint8_t **ptr, UINTN var)
 {
     memcpy(*ptr, &var, sizeof(var));

@@ -79,6 +79,7 @@
 #include <guid.h>
 #include <serialize.h>
 #include <handler.h>
+#include <xapidb.h>
 #include <mor.h>
 #include <ppi.h>
 
@@ -198,30 +199,164 @@ get_space_usage(void)
 }
 
 /*
- * Returns true if the given variable is one of the Secure Boot key variables
- * (PK, KEK, db, dbx) whose update should trigger a certificate state refresh
- * in XAPI.
+ * Parse an ASN1_TIME into year, month, day components.
+ * Returns true on success.
  */
 static bool
-is_secureboot_key_variable(const uint8_t *name, UINTN name_len,
-                            const EFI_GUID *guid)
+parse_asn1_time(const ASN1_TIME *atime, int *year, int *month, int *day)
 {
-    if (name_len == sizeof(EFI_PLATFORM_KEY_NAME) &&
-            !memcmp(name, EFI_PLATFORM_KEY_NAME, name_len) &&
-            !memcmp(guid, &gEfiGlobalVariableGuid, GUID_LEN))
-        return true;
+    struct tm tm_val;
 
-    if (name_len == sizeof(EFI_KEY_EXCHANGE_KEY_NAME) &&
-            !memcmp(name, EFI_KEY_EXCHANGE_KEY_NAME, name_len) &&
-            !memcmp(guid, &gEfiGlobalVariableGuid, GUID_LEN))
-        return true;
+    memset(&tm_val, 0, sizeof(tm_val));
 
-    if (!memcmp(guid, &gEfiImageSecurityDatabaseGuid, GUID_LEN)) {
-        if (name_len == sizeof(EFI_IMAGE_SECURITY_DATABASE) &&
-                !memcmp(name, EFI_IMAGE_SECURITY_DATABASE, name_len))
-            return true;
-        if (name_len == sizeof(EFI_IMAGE_SECURITY_DATABASE1) &&
-                !memcmp(name, EFI_IMAGE_SECURITY_DATABASE1, name_len))
+    if (!atime)
+        return false;
+
+    if (ASN1_TIME_to_tm(atime, &tm_val) != 1)
+        return false;
+
+    *year = tm_val.tm_year + 1900;
+    *month = tm_val.tm_mon + 1;
+    *day = tm_val.tm_mday;
+    return true;
+}
+
+/*
+ * Count the number of X.509 certificates in EFI signature list data.
+ * For each X.509 signature list entry, iterate through the individual
+ * signature data entries, parse each DER-encoded certificate using OpenSSL,
+ * and extract the subject, issue date and expiry date.
+ *
+ * If certs is non-NULL and max_certs > 0, fills in cert_info structs.
+ * Returns the total count of X.509 certificates, or -1 on error.
+ */
+static int
+count_x509_certs_in_siglist(const uint8_t *data, UINTN data_len,
+                            struct cert_info *certs, int max_certs,
+                            int verbose)
+{
+    int count = 0;
+    UINTN offset = 0;
+
+    while (offset + sizeof(EFI_SIGNATURE_LIST) <= data_len) {
+        const EFI_SIGNATURE_LIST *siglist =
+            (const EFI_SIGNATURE_LIST *)(data + offset);
+        UINT32 sig_list_size = siglist->SignatureListSize;
+        UINT32 sig_header_size = siglist->SignatureHeaderSize;
+        UINT32 sig_size = siglist->SignatureSize;
+        UINTN sig_data_offset;
+
+        if (sig_list_size == 0 || sig_list_size > data_len - offset)
+            return -1;
+
+        if (memcmp(&siglist->SignatureType, &gEfiCertX509Guid, GUID_LEN)) {
+            offset += sig_list_size;
+            continue;
+        }
+
+        /* Start of signature data entries */
+        sig_data_offset = offset + sizeof(EFI_SIGNATURE_LIST) + sig_header_size;
+
+        if (sig_size < EFI_SIG_DATA_SIZE)
+            return -1;
+
+        /* Iterate each EFI_SIGNATURE_DATA in this list */
+        while (sig_data_offset + sig_size <= offset + sig_list_size) {
+            const uint8_t *cert_der;
+            UINTN cert_der_len;
+            X509 *x509;
+
+            /* Skip SignatureOwner GUID to get to the DER certificate */
+            cert_der = data + sig_data_offset + EFI_SIG_DATA_SIZE;
+            cert_der_len = sig_size - EFI_SIG_DATA_SIZE;
+
+            x509 = d2i_X509(NULL, &cert_der, (long)cert_der_len);
+            if (x509) {
+                const ASN1_TIME *not_before = X509_get0_notBefore(x509);
+                const ASN1_TIME *not_after = X509_get0_notAfter(x509);
+                char subject_buf[MAX_CERT_SUBJECT];
+
+                X509_NAME_oneline(X509_get_subject_name(x509),
+                                  subject_buf, sizeof(subject_buf));
+
+                if (certs && count < max_certs) {
+                    struct cert_info *ci = &certs[count];
+
+                    snprintf(ci->subject, sizeof(ci->subject), "%s",
+                             subject_buf);
+
+                    if (!parse_asn1_time(not_before,
+                                         &ci->not_before_year,
+                                         &ci->not_before_month,
+                                         &ci->not_before_day)) {
+                        ci->not_before_year = 0;
+                        ci->not_before_month = 0;
+                        ci->not_before_day = 0;
+                    }
+                    if (!parse_asn1_time(not_after,
+                                         &ci->not_after_year,
+                                         &ci->not_after_month,
+                                         &ci->not_after_day)) {
+                        ci->not_after_year = 0;
+                        ci->not_after_month = 0;
+                        ci->not_after_day = 0;
+                    }
+                }
+
+                if (verbose)
+                    INFO("  cert[%d]: subject=%s, "
+                         "notBefore=%04d-%02d-%02d, "
+                         "notAfter=%04d-%02d-%02d\n",
+                         count, subject_buf,
+                         certs && count < max_certs ?
+                             certs[count].not_before_year : 0,
+                         certs && count < max_certs ?
+                             certs[count].not_before_month : 0,
+                         certs && count < max_certs ?
+                             certs[count].not_before_day : 0,
+                         certs && count < max_certs ?
+                             certs[count].not_after_year : 0,
+                         certs && count < max_certs ?
+                             certs[count].not_after_month : 0,
+                         certs && count < max_certs ?
+                             certs[count].not_after_day : 0);
+
+                X509_free(x509);
+                count++;
+            } else {
+                if (verbose)
+                    INFO("Failed to parse X.509 certificate at offset %lu\n",
+                        sig_data_offset);
+            }
+
+            sig_data_offset += sig_size;
+        }
+
+        offset += sig_list_size;
+    }
+
+    return count;
+}
+
+/*
+ * Check whether the given signature list data contains a latest-era certificate,
+ * i.e. one issued in 2023 and expiring in 2038.
+ * Returns true if such a certificate is found.
+ */
+static bool
+siglist_has_latest_cert(const uint8_t *data, UINTN data_len, int verbose)
+{
+    struct cert_info certs[MAX_CERTS_IN_SIGLIST];
+    int count, i;
+
+    count = count_x509_certs_in_siglist(data, data_len,
+                                        certs, MAX_CERTS_IN_SIGLIST,
+                                        verbose);
+    if (count <= 0)
+        return false;
+
+    for (i = 0; i < count && i < MAX_CERTS_IN_SIGLIST; i++) {
+        if (NOT_EXPIRE(certs[i].not_before_year, certs[i].not_after_year))
             return true;
     }
 
@@ -1624,10 +1759,11 @@ do_set_variable(uint8_t *comm_buf)
     uint8_t *ptr, *name, *data;
     EFI_GUID guid;
     UINT32 attr;
-    BOOLEAN at_runtime, append;
+    BOOLEAN update, at_runtime, append;
     EFI_STATUS status;
     uint8_t digest[SHA256_DIGEST_SIZE] = {0};
     EFI_TIME timestamp;
+    bool cert_update;
 
     ptr = comm_buf;
     unserialize_uint32(&ptr); /* version */
@@ -1645,8 +1781,11 @@ do_set_variable(uint8_t *comm_buf)
         return;
     }
     attr = unserialize_uint32(&ptr);
+    update = unserialize_boolean(&ptr);
     at_runtime = unserialize_boolean(&ptr);
     ptr = comm_buf;
+
+    cert_update = update ? true : false;
 
     append = !!(attr & EFI_VARIABLE_APPEND_WRITE);
     attr &= ~EFI_VARIABLE_APPEND_WRITE;
@@ -1840,9 +1979,7 @@ do_set_variable(uint8_t *comm_buf)
             }
             free(name);
             if (should_save && persistent) {
-                if (!db->set_variable(is_secureboot_key_variable(l->name,
-                                                                 l->name_len,
-                                                                 &l->guid))) {
+                if (!db->set_variable(cert_update)) {
                     /* efivar delete and append/update case */
                     rollback_var->next = l->next;
                     if (prev)
@@ -1929,9 +2066,7 @@ do_set_variable(uint8_t *comm_buf)
         l->next = var_list;
         var_list = l;
         if ((attr & EFI_VARIABLE_NON_VOLATILE) && persistent) {
-            if (!db->set_variable(is_secureboot_key_variable(l->name,
-                                                             l->name_len,
-                                                             &l->guid))) {
+            if (!db->set_variable(cert_update)) {
                 /* remove var inserted to head */
                 var_list = l->next;
 
@@ -2187,12 +2322,14 @@ setup_variables(void)
 
 static bool
 set_variable_from_auth(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
-                       const uint8_t *data, off_t data_len, bool append)
+                       const uint8_t *data, off_t data_len, bool append,
+                       bool update)
 {
     uint8_t buf[SHMEM_SIZE];
     uint8_t *ptr;
     EFI_STATUS status;
     UINT32 attr = ATTR_BRNV_TIME;
+    BOOLEAN cert_update = update ? 1 : 0;
 
     if (append)
         attr |= EFI_VARIABLE_APPEND_WRITE;
@@ -2204,6 +2341,7 @@ set_variable_from_auth(const uint8_t *name, UINTN name_len, const EFI_GUID *guid
     serialize_guid(&ptr, guid);
     serialize_data(&ptr, data, data_len);
     serialize_uint32(&ptr, attr);
+    serialize_boolean(&ptr, cert_update);
     *ptr = 0; /* at_runtime */
     dispatch_command(buf);
 
@@ -2221,6 +2359,42 @@ bool
 setup_keys(void)
 {
     int i;
+    bool update = true;
+    const WIN_CERTIFICATE *hdr;
+    UINTN header_len;
+    const uint8_t *payload;
+    UINTN payload_len;
+    bool has_latest;
+
+    /*
+     * Pre-process KEK: check its certificate era and install it with the
+     * appropriate update flag. update=false means certs are already latest
+     * (no update required); update=true means only 2011 certs are present
+     * and an update is needed.
+     */
+    if (!auth_info[2].data) {
+        WARN("Cannot check KEK cert state: auth data missing\n");
+        return false;
+    }
+
+    if (auth_info[2].data_len < (off_t)(sizeof(EFI_TIME) + sizeof(WIN_CERTIFICATE))) {
+        WARN("KEK auth data too short to extract payload\n");
+        return false;
+    }
+
+    hdr = (const WIN_CERTIFICATE *)(auth_info[2].data + sizeof(EFI_TIME));
+    header_len = sizeof(EFI_TIME) + hdr->dwLength;
+
+    if (header_len >= (UINTN)auth_info[2].data_len) {
+        WARN("KEK auth header length exceeds data length\n");
+        return false;
+    }
+
+    payload = auth_info[2].data + header_len;
+    payload_len = auth_info[2].data_len - header_len;
+
+    has_latest = siglist_has_latest_cert(payload, payload_len, 0);
+    update = !has_latest;
 
     for (i = 0; i < ARRAY_SIZE(auth_info); i++) {
         if (!auth_info[i].data) {
@@ -2248,7 +2422,8 @@ setup_keys(void)
                                     auth_info[i].guid,
                                     auth_info[i].data,
                                     auth_info[i].data_len,
-                                    auth_info[i].append))
+                                    auth_info[i].append,
+                                    update))
             return false;
     }
 
@@ -2336,177 +2511,11 @@ free_auth_data(void)
 }
 
 /*
- * Parse an ASN1_TIME into year, month, day components.
- * Returns true on success.
- */
-static bool
-parse_asn1_time(const ASN1_TIME *atime, int *year, int *month, int *day)
-{
-    struct tm tm_val;
-
-    memset(&tm_val, 0, sizeof(tm_val));
-
-    if (!atime)
-        return false;
-
-    if (ASN1_TIME_to_tm(atime, &tm_val) != 1)
-        return false;
-
-    *year = tm_val.tm_year + 1900;
-    *month = tm_val.tm_mon + 1;
-    *day = tm_val.tm_mday;
-    return true;
-}
-
-/*
- * Count the number of X.509 certificates in EFI signature list data.
- * For each X.509 signature list entry, iterate through the individual
- * signature data entries, parse each DER-encoded certificate using OpenSSL,
- * and extract the subject, issue date and expiry date.
- *
- * If certs is non-NULL and max_certs > 0, fills in cert_info structs.
- * Returns the total count of X.509 certificates, or -1 on error.
- */
-static int
-count_x509_certs_in_siglist(const uint8_t *data, UINTN data_len,
-                            struct cert_info *certs, int max_certs,
-                            int verbose)
-{
-    int count = 0;
-    UINTN offset = 0;
-
-    while (offset + sizeof(EFI_SIGNATURE_LIST) <= data_len) {
-        const EFI_SIGNATURE_LIST *siglist =
-            (const EFI_SIGNATURE_LIST *)(data + offset);
-        UINT32 sig_list_size = siglist->SignatureListSize;
-        UINT32 sig_header_size = siglist->SignatureHeaderSize;
-        UINT32 sig_size = siglist->SignatureSize;
-        UINTN sig_data_offset;
-
-        if (sig_list_size == 0 || sig_list_size > data_len - offset)
-            return -1;
-
-        if (memcmp(&siglist->SignatureType, &gEfiCertX509Guid, GUID_LEN)) {
-            offset += sig_list_size;
-            continue;
-        }
-
-        /* Start of signature data entries */
-        sig_data_offset = offset + sizeof(EFI_SIGNATURE_LIST) + sig_header_size;
-
-        if (sig_size < EFI_SIG_DATA_SIZE)
-            return -1;
-
-        /* Iterate each EFI_SIGNATURE_DATA in this list */
-        while (sig_data_offset + sig_size <= offset + sig_list_size) {
-            const uint8_t *cert_der;
-            UINTN cert_der_len;
-            X509 *x509;
-
-            /* Skip SignatureOwner GUID to get to the DER certificate */
-            cert_der = data + sig_data_offset + EFI_SIG_DATA_SIZE;
-            cert_der_len = sig_size - EFI_SIG_DATA_SIZE;
-
-            x509 = d2i_X509(NULL, &cert_der, (long)cert_der_len);
-            if (x509) {
-                const ASN1_TIME *not_before = X509_get0_notBefore(x509);
-                const ASN1_TIME *not_after = X509_get0_notAfter(x509);
-                char subject_buf[MAX_CERT_SUBJECT];
-
-                X509_NAME_oneline(X509_get_subject_name(x509),
-                                  subject_buf, sizeof(subject_buf));
-
-                if (certs && count < max_certs) {
-                    struct cert_info *ci = &certs[count];
-
-                    snprintf(ci->subject, sizeof(ci->subject), "%s",
-                             subject_buf);
-
-                    if (!parse_asn1_time(not_before,
-                                         &ci->not_before_year,
-                                         &ci->not_before_month,
-                                         &ci->not_before_day)) {
-                        ci->not_before_year = 0;
-                        ci->not_before_month = 0;
-                        ci->not_before_day = 0;
-                    }
-                    if (!parse_asn1_time(not_after,
-                                         &ci->not_after_year,
-                                         &ci->not_after_month,
-                                         &ci->not_after_day)) {
-                        ci->not_after_year = 0;
-                        ci->not_after_month = 0;
-                        ci->not_after_day = 0;
-                    }
-                }
-
-                if (verbose)
-                    INFO("  cert[%d]: subject=%s, "
-                         "notBefore=%04d-%02d-%02d, "
-                         "notAfter=%04d-%02d-%02d\n",
-                         count, subject_buf,
-                         certs && count < max_certs ?
-                             certs[count].not_before_year : 0,
-                         certs && count < max_certs ?
-                             certs[count].not_before_month : 0,
-                         certs && count < max_certs ?
-                             certs[count].not_before_day : 0,
-                         certs && count < max_certs ?
-                             certs[count].not_after_year : 0,
-                         certs && count < max_certs ?
-                             certs[count].not_after_month : 0,
-                         certs && count < max_certs ?
-                             certs[count].not_after_day : 0);
-
-                X509_free(x509);
-                count++;
-            } else {
-                if (verbose)
-                    INFO("Failed to parse X.509 certificate at offset %lu\n",
-                        sig_data_offset);
-            }
-
-            sig_data_offset += sig_size;
-        }
-
-        offset += sig_list_size;
-    }
-
-    return count;
-}
-
-/*
- * Check whether the given signature list data contains a 2023-era certificate,
- * i.e. one issued in 2023 and expiring in 2038.
- * Returns true if such a certificate is found.
- */
-static bool
-siglist_has_2023_cert(const uint8_t *data, UINTN data_len, int verbose)
-{
-    struct cert_info certs[MAX_CERTS_IN_SIGLIST];
-    int count, i;
-
-    count = count_x509_certs_in_siglist(data, data_len,
-                                        certs, MAX_CERTS_IN_SIGLIST,
-                                        verbose);
-    if (count <= 0)
-        return false;
-
-    for (i = 0; i < count && i < MAX_CERTS_IN_SIGLIST; i++) {
-        if (certs[i].not_before_year == 2023 &&
-                certs[i].not_after_year > 2026)
-            return true;
-    }
-
-    return false;
-}
-
-/*
  * Check the VM's NVRAM KEK variable certificate state.
  * Returns:
- *   CERT_STATE_UNKNOWN - no KEK variable or no X.509 certs found
- *   CERT_STATE_2011    - only 2011-era certificate(s) present
- *   CERT_STATE_2023    - 2023-era certificate(s) present
+ *   CERT_STATE_UNKNOWN          - no KEK variable or no X.509 certs found
+ *   CERT_STATE_UPDATE_REQUIRED  - only 2011-era certificate(s) present
+ *   CERT_STATE_UPDATE_OK        - 2023-era certificate(s) present
  */
 enum certificate_current_state
 check_nvram_certs_state(int verbose)
@@ -2535,15 +2544,13 @@ check_nvram_certs_state(int verbose)
     if (count > 1) {
         /* Check for a 2023 certificate (issued 2023, expires 2038) */
         for (i = 0; i < count && i < MAX_CERTS_IN_SIGLIST; i++) {
-            if (certs[i].not_before_year == 2023 &&
-                    certs[i].not_after_year > 2026)
-                return CERT_STATE_2023;
+            if (NOT_EXPIRE(certs[i].not_before_year, certs[i].not_after_year))
+                return CERT_STATE_UPDATE_OK;
         }
     } else {
         /* count == 1: check if it is a 2011 certificate */
-        if (certs[0].not_before_year == 2011 &&
-                certs[0].not_after_year <= 2026)
-            return CERT_STATE_2011;
+        if (!NOT_EXPIRE(certs[0].not_before_year, certs[0].not_after_year))
+            return CERT_STATE_UPDATE_REQUIRED;
     }
     return CERT_STATE_UNKNOWN;
 }
@@ -2552,36 +2559,42 @@ check_nvram_certs_state(int verbose)
  * Check payload certificate state by parsing the given payload
  * as an EFI signature list.
  * Returns:
- *   CERT_STATE_UNKNOWN - no KEK variable or no X.509 certs found
- *   CERT_STATE_2011    - only 2011-era certificate(s) present
- *   CERT_STATE_2023    - 2023-era certificate(s) present
+ *   CERT_STATE_UNKNOWN          - no KEK variable or no X.509 certs found
+ *   CERT_STATE_UPDATE_REQUIRED  - only 2011-era certificate(s) present
+ *   CERT_STATE_UPDATE_OK        - 2023-era certificate(s) present
  */
 enum certificate_current_state
 check_payload_certs_state(const uint8_t *data, UINTN len, int verbose)
 {
+    uint8_t *kek_data;
+    UINTN kek_data_len;
     struct cert_info certs[MAX_CERTS_IN_SIGLIST];
+    enum certificate_current_state result = CERT_STATE_UNKNOWN;
     int count, i;
 
-    count = count_x509_certs_in_siglist(data, len, certs,
+    if (!xapidb_get_kekdata(data, len, &kek_data, &kek_data_len, verbose))
+        return CERT_STATE_UNKNOWN;
+
+    count = count_x509_certs_in_siglist(kek_data, kek_data_len, certs,
                                         MAX_CERTS_IN_SIGLIST,
                                         verbose);
+    free(kek_data);
+
     if (count <= 0)
         return CERT_STATE_UNKNOWN;
 
     if (count > 1) {
         /* Check for a 2023 certificate (issued 2023, expires 2038) */
         for (i = 0; i < count && i < MAX_CERTS_IN_SIGLIST; i++) {
-            if (certs[i].not_before_year == 2023 &&
-                    certs[i].not_after_year > 2026)
-                return CERT_STATE_2023;
+            if (NOT_EXPIRE(certs[i].not_before_year, certs[i].not_after_year))
+                return CERT_STATE_UPDATE_OK;
         }
     } else {
         /* count == 1: check if it is a 2011 certificate */
-        if (certs[0].not_before_year == 2011 &&
-                certs[0].not_after_year <= 2026)
-            return CERT_STATE_2011;
+        if (!NOT_EXPIRE(certs[0].not_before_year, certs[0].not_after_year))
+            return CERT_STATE_UPDATE_REQUIRED;
     }
-    return CERT_STATE_UNKNOWN;
+    return result;
 }
 
 /*
@@ -2616,7 +2629,5 @@ check_local_auth_updated(int verbose)
     payload = auth_data + header_len;
     payload_len = auth_len - header_len;
 
-    /* TODO: how to check new PK ? */
-
-    return siglist_has_2023_cert(payload, payload_len, verbose);
+    return siglist_has_latest_cert(payload, payload_len, verbose);
 }
