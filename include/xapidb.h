@@ -65,7 +65,6 @@ enum backend_init_status xapidb_init(void);
 enum backend_init_status xapidb_file_init(void);
 bool xapidb_sb_notify(void);
 bool secureboot_certificates_state_is_update_on_boot(const char *uuid);
-bool xapidb_set_secureboot_certs_state(const char *uuid, char *state);
 bool xapidb_get_kekdata(const uint8_t *encoded, UINTN len, uint8_t **kek_data,
                         UINTN *kek_data_len, int verbose);
 

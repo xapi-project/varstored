@@ -113,5 +113,7 @@ enum certificate_current_state check_payload_certs_state(const uint8_t *data,
                                                          UINTN len,
                                                          int verbose);
 bool check_local_auth_updated(int verbose);
+bool check_authdata_has_latest_cert(const uint8_t *name, UINTN name_len,
+                                    const uint8_t *data, off_t data_len);
 
 #endif

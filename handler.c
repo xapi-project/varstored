@@ -1759,7 +1759,7 @@ do_set_variable(uint8_t *comm_buf)
     uint8_t *ptr, *name, *data;
     EFI_GUID guid;
     UINT32 attr;
-    BOOLEAN update, at_runtime, append;
+    BOOLEAN at_runtime, append;
     EFI_STATUS status;
     uint8_t digest[SHA256_DIGEST_SIZE] = {0};
     EFI_TIME timestamp;
@@ -1781,11 +1781,11 @@ do_set_variable(uint8_t *comm_buf)
         return;
     }
     attr = unserialize_uint32(&ptr);
-    update = unserialize_boolean(&ptr);
     at_runtime = unserialize_boolean(&ptr);
     ptr = comm_buf;
 
-    cert_update = update ? true : false;
+    cert_update = check_authdata_has_latest_cert(name, name_len, data,
+                                                 (off_t)data_len);
 
     append = !!(attr & EFI_VARIABLE_APPEND_WRITE);
     attr &= ~EFI_VARIABLE_APPEND_WRITE;
@@ -2322,14 +2322,12 @@ setup_variables(void)
 
 static bool
 set_variable_from_auth(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
-                       const uint8_t *data, off_t data_len, bool append,
-                       bool update)
+                       const uint8_t *data, off_t data_len, bool append)
 {
     uint8_t buf[SHMEM_SIZE];
     uint8_t *ptr;
     EFI_STATUS status;
     UINT32 attr = ATTR_BRNV_TIME;
-    BOOLEAN cert_update = update ? 1 : 0;
 
     if (append)
         attr |= EFI_VARIABLE_APPEND_WRITE;
@@ -2341,7 +2339,6 @@ set_variable_from_auth(const uint8_t *name, UINTN name_len, const EFI_GUID *guid
     serialize_guid(&ptr, guid);
     serialize_data(&ptr, data, data_len);
     serialize_uint32(&ptr, attr);
-    serialize_boolean(&ptr, cert_update);
     *ptr = 0; /* at_runtime */
     dispatch_command(buf);
 
@@ -2359,42 +2356,6 @@ bool
 setup_keys(void)
 {
     int i;
-    bool update = true;
-    const WIN_CERTIFICATE *hdr;
-    UINTN header_len;
-    const uint8_t *payload;
-    UINTN payload_len;
-    bool has_latest;
-
-    /*
-     * Pre-process KEK: check its certificate era and install it with the
-     * appropriate update flag. update=false means certs are already latest
-     * (no update required); update=true means only 2011 certs are present
-     * and an update is needed.
-     */
-    if (!auth_info[2].data) {
-        WARN("Cannot check KEK cert state: auth data missing\n");
-        return false;
-    }
-
-    if (auth_info[2].data_len < (off_t)(sizeof(EFI_TIME) + sizeof(WIN_CERTIFICATE))) {
-        WARN("KEK auth data too short to extract payload\n");
-        return false;
-    }
-
-    hdr = (const WIN_CERTIFICATE *)(auth_info[2].data + sizeof(EFI_TIME));
-    header_len = sizeof(EFI_TIME) + hdr->dwLength;
-
-    if (header_len >= (UINTN)auth_info[2].data_len) {
-        WARN("KEK auth header length exceeds data length\n");
-        return false;
-    }
-
-    payload = auth_info[2].data + header_len;
-    payload_len = auth_info[2].data_len - header_len;
-
-    has_latest = siglist_has_latest_cert(payload, payload_len, 0);
-    update = !has_latest;
 
     for (i = 0; i < ARRAY_SIZE(auth_info); i++) {
         if (!auth_info[i].data) {
@@ -2422,8 +2383,7 @@ setup_keys(void)
                                     auth_info[i].guid,
                                     auth_info[i].data,
                                     auth_info[i].data_len,
-                                    auth_info[i].append,
-                                    update))
+                                    auth_info[i].append))
             return false;
     }
 
@@ -2595,6 +2555,49 @@ check_payload_certs_state(const uint8_t *data, UINTN len, int verbose)
             return CERT_STATE_UPDATE_REQUIRED;
     }
     return result;
+}
+
+/*
+ * Check whether the given auth data for the named variable contains a latest
+ * certificate. The name must identify the KEK variable; any other name returns
+ * false immediately. Returns true if a latest certificate is present in the
+ * payload.
+ */
+bool
+check_authdata_has_latest_cert(const uint8_t *name, UINTN name_len,
+                                const uint8_t *data, off_t data_len)
+{
+    const WIN_CERTIFICATE *hdr;
+    UINTN header_len;
+    const uint8_t *payload;
+    UINTN payload_len;
+
+    if (!data) {
+        WARN("Cannot check certificate state: auth data missing\n");
+        return false;
+    }
+
+    if (data_len < (off_t)(sizeof(EFI_TIME) + sizeof(WIN_CERTIFICATE))) {
+        WARN("The auth data too short to extract payload\n");
+        return false;
+    }
+
+    if (name_len != sizeof(EFI_KEY_EXCHANGE_KEY_NAME) ||
+            memcmp(name, EFI_KEY_EXCHANGE_KEY_NAME, name_len) != 0)
+        return false;
+
+    hdr = (const WIN_CERTIFICATE *)(data + sizeof(EFI_TIME));
+    header_len = sizeof(EFI_TIME) + hdr->dwLength;
+
+    if (header_len >= (UINTN)data_len) {
+        WARN("KEK auth header length exceeds data length\n");
+        return false;
+    }
+
+    payload = data + header_len;
+    payload_len = data_len - header_len;
+
+    return siglist_has_latest_cert(payload, payload_len, 0);
 }
 
 /*

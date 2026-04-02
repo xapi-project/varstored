@@ -127,6 +127,7 @@ int main(int argc, char **argv)
     state = check_nvram_certs_state(verbose);
     printf("%s\n", cert_state_to_string(state));
 
+#if 0
     if (opt_flag) {
         if (state == CERT_STATE_UPDATE_OK) {
             if (!xapidb_set_secureboot_certs_state(xapidb_get_uuid(),
@@ -148,6 +149,7 @@ int main(int argc, char **argv)
             fprintf(stderr, "secureboot_certificates_state is unknown\n");
         }
     }
+#endif
 
     return 0;
 }

@@ -429,7 +429,6 @@ static void call_set_variable(const dstring *name, const EFI_GUID *guid,
     serialize_guid(&ptr, guid);
     serialize_data(&ptr, data, data_len);
     serialize_uint32(&ptr, attr);
-    serialize_boolean(&ptr, 0);
     serialize_boolean(&ptr, at_runtime);
 
     dispatch_command(buf);
@@ -3080,6 +3079,90 @@ static void test_check_local_auth_updated_truncated(void)
     auth_info[2].data_len = saved_len;
 }
 
+/* Test check_authdata_has_latest_cert returns false when data is NULL */
+static void test_check_authdata_has_latest_cert_null_data(void)
+{
+    static const uint8_t kek_name[] = {'K',0,'E',0,'K',0};
+
+    g_assert_false(check_authdata_has_latest_cert(kek_name, sizeof(kek_name),
+                                                  NULL, 0));
+}
+
+/* Test check_authdata_has_latest_cert returns false for truncated data */
+static void test_check_authdata_has_latest_cert_truncated(void)
+{
+    static const uint8_t kek_name[] = {'K',0,'E',0,'K',0};
+    uint8_t small_buf[4] = {0};
+
+    g_assert_false(check_authdata_has_latest_cert(kek_name, sizeof(kek_name),
+                                                  small_buf,
+                                                  sizeof(small_buf)));
+}
+
+/* Test check_authdata_has_latest_cert returns false for wrong variable name */
+static void test_check_authdata_has_latest_cert_wrong_name(void)
+{
+    static const uint8_t wrong_name[] = {'d',0,'b',0};
+    EFI_SIGNATURE_LIST *siglist;
+    size_t siglist_len;
+    uint8_t *fake_auth;
+    size_t fake_auth_len;
+
+    build_siglist_from_pem("certs/ms-kek-ca-2023.pem",
+                           &siglist, &siglist_len);
+    fake_auth = build_fake_auth((uint8_t *)siglist, siglist_len, &fake_auth_len);
+
+    g_assert_false(check_authdata_has_latest_cert(wrong_name, sizeof(wrong_name),
+                                                  fake_auth,
+                                                  (off_t)fake_auth_len));
+
+    free(fake_auth);
+    free(siglist);
+}
+
+/* Test check_authdata_has_latest_cert returns false for 2011-only KEK */
+static void test_check_authdata_has_latest_cert_2011(void)
+{
+    static const uint8_t kek_name[] = {'K',0,'E',0,'K',0};
+    EFI_SIGNATURE_LIST *siglist;
+    size_t siglist_len;
+    uint8_t *fake_auth;
+    size_t fake_auth_len;
+
+    build_siglist_from_pem("certs/MicCorKEKCA2011_2011-06-24.pem",
+                           &siglist, &siglist_len);
+    fake_auth = build_fake_auth((uint8_t *)siglist, siglist_len, &fake_auth_len);
+
+    g_assert_false(check_authdata_has_latest_cert(kek_name, sizeof(kek_name),
+                                                  fake_auth,
+                                                  (off_t)fake_auth_len));
+
+    free(fake_auth);
+    free(siglist);
+}
+
+/* Test check_authdata_has_latest_cert returns true for 2023 KEK */
+static void test_check_authdata_has_latest_cert_2023(void)
+{
+    static const uint8_t kek_name[] = {'K',0,'E',0,'K',0};
+    EFI_SIGNATURE_LIST *siglist;
+    size_t siglist_len;
+    uint8_t *fake_auth;
+    size_t fake_auth_len;
+
+    build_siglist_from_pems("certs/MicCorKEKCA2011_2011-06-24.pem",
+                            "certs/ms-kek-ca-2023.pem",
+                            &siglist, &siglist_len);
+    fake_auth = build_fake_auth((uint8_t *)siglist, siglist_len, &fake_auth_len);
+
+    g_assert_true(check_authdata_has_latest_cert(kek_name, sizeof(kek_name),
+                                                 fake_auth,
+                                                 (off_t)fake_auth_len));
+
+    free(fake_auth);
+    free(siglist);
+}
+
 /*
  * Mock XAPI socket server for testing xapidb XMLRPC functions.
  *
@@ -3401,6 +3484,16 @@ int main(int argc, char **argv)
                     test_check_local_auth_updated_2023);
     g_test_add_func("/test/cert_update/check_local_auth_updated/truncated",
                     test_check_local_auth_updated_truncated);
+    g_test_add_func("/test/cert_update/check_authdata_has_latest_cert/null_data",
+                    test_check_authdata_has_latest_cert_null_data);
+    g_test_add_func("/test/cert_update/check_authdata_has_latest_cert/truncated",
+                    test_check_authdata_has_latest_cert_truncated);
+    g_test_add_func("/test/cert_update/check_authdata_has_latest_cert/wrong_name",
+                    test_check_authdata_has_latest_cert_wrong_name);
+    g_test_add_func("/test/cert_update/check_authdata_has_latest_cert/2011",
+                    test_check_authdata_has_latest_cert_2011);
+    g_test_add_func("/test/cert_update/check_authdata_has_latest_cert/2023",
+                    test_check_authdata_has_latest_cert_2023);
     g_test_add_func("/test/cert_update/get_cert_state/update_on_boot",
                     test_get_cert_state_update_on_boot);
     g_test_add_func("/test/cert_update/get_cert_state/not_update",

@@ -90,6 +90,7 @@
       "</params>" \
     "</methodCall>"
 
+#if 0
 #define VM_SET_NVRAM_EFI_VARIABLES_CALL \
     "<?xml version='1.0'?>" \
     "<methodCall>" \
@@ -98,7 +99,19 @@
         "<param><value><string>%s</string></value></param>" \
         "<param><value><string>%s</string></value></param>" \
         "<param><value><string>%s</string></value></param>" \
-        "<param><value><boolean>%d</boolean></value></param>" \
+      "</params>" \
+    "</methodCall>"
+#endif
+
+#define VM_SET_NVRAM_EFI_VARIABLES_CALL_V2 \
+    "<?xml version='1.0'?>" \
+    "<methodCall>" \
+      "<methodName>VM.set_NVRAM_EFI_variables_v2</methodName>" \
+      "<params>" \
+        "<param><value><string>%s</string></value></param>" \
+        "<param><value><string>%s</string></value></param>" \
+        "<param><value><string>%s</string></value></param>" \
+        "<param><value><string>%s</string></value></param>" \
       "</params>" \
     "</methodCall>"
 
@@ -140,17 +153,6 @@
     "<methodCall>" \
       "<methodName>VM.get_secureboot_certificates_state</methodName>" \
       "<params>" \
-        "<param><value><string>%s</string></value></param>" \
-        "<param><value><string>%s</string></value></param>" \
-      "</params>" \
-    "</methodCall>"
-
-#define VM_SET_SECUREBOOT_CERTIFICATES_STATE_CALL \
-    "<?xml version='1.0'?>" \
-    "<methodCall>" \
-      "<methodName>VM.set_secureboot_certificates_state</methodName>" \
-      "<params>" \
-        "<param><value><string>%s</string></value></param>" \
         "<param><value><string>%s</string></value></param>" \
         "<param><value><string>%s</string></value></param>" \
       "</params>" \
@@ -414,7 +416,7 @@ send_to_xapi(char *uuid, char *data, bool update)
     int status;
     bool ret = false;
     char *session_ref = NULL, *response = NULL;
-    int cert_state_update = update ? 1 : 0;
+    char *update_str= update ? "yes" : "no";
 
     status = xmlrpc_call(&response, LOGIN_CALL);
     if (status != HTTP_STATUS_OK)
@@ -439,8 +441,8 @@ send_to_xapi(char *uuid, char *data, bool update)
     }
 
     status = xmlrpc_call(&response,
-                         VM_SET_NVRAM_EFI_VARIABLES_CALL,
-                         session_ref, xapidb_vm_ref, data, cert_state_update);
+                         VM_SET_NVRAM_EFI_VARIABLES_CALL_V2,
+                         session_ref, xapidb_vm_ref, data, update_str);
     if (status != HTTP_STATUS_OK)
         goto out;
     if (!xmlrpc_process(response, NULL))
@@ -845,57 +847,6 @@ secureboot_certificates_state_is_update_on_boot(const char *uuid)
 
     free(state);
     return result;
-}
-
-/*
- * Set the VM's secureboot_certificates_state to "ok" via XAPI XML-RPC.
- * Returns true on success.
- */
-bool
-xapidb_set_secureboot_certs_state(const char *uuid, char *state)
-{
-    int status;
-    bool ret = false;
-    char *session_ref = NULL, *response = NULL;
-
-    status = xmlrpc_call(&response, LOGIN_CALL);
-    if (status != HTTP_STATUS_OK)
-        goto out;
-    if (!xmlrpc_process(response, &session_ref))
-        goto out;
-    free(response);
-    response = NULL;
-
-    if (!xapidb_vm_ref) {
-        status = xmlrpc_call(&response, VM_GET_BY_UUID_CALL, session_ref, uuid);
-        if (status != HTTP_STATUS_OK)
-            goto out;
-        if (!xmlrpc_process(response, &xapidb_vm_ref))
-            goto out;
-        free(response);
-        response = NULL;
-    }
-
-    status = xmlrpc_call(&response,
-                         VM_SET_SECUREBOOT_CERTIFICATES_STATE_CALL,
-                         session_ref, xapidb_vm_ref, state);
-    if (status != HTTP_STATUS_OK)
-        goto out;
-    if (!xmlrpc_process(response, NULL))
-        goto out;
-    free(response);
-    response = NULL;
-
-    status = xmlrpc_call(&response, LOGOUT_CALL, session_ref);
-    if (status != HTTP_STATUS_OK || !xmlrpc_process(response, NULL))
-        goto out;
-
-    ret = true;
-
-out:
-    free(session_ref);
-    free(response);
-    return ret;
 }
 
 /*
