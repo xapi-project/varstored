@@ -418,6 +418,9 @@ send_to_xapi(char *uuid, char *data, bool update)
     char *session_ref = NULL, *response = NULL;
     char *update_str= update ? "yes" : "no";
 
+    INFO("send_to_xapi: uuid=%s update=%s (calling VM.set_NVRAM_EFI_variables_v2)\n",
+         uuid, update_str);
+
     status = xmlrpc_call(&response, LOGIN_CALL);
     if (status != HTTP_STATUS_OK)
         goto out;
@@ -440,9 +443,11 @@ send_to_xapi(char *uuid, char *data, bool update)
         response = NULL;
     }
 
+    INFO("send_to_xapi: calling v2 API with update_str=%s\n", update_str);
     status = xmlrpc_call(&response,
                          VM_SET_NVRAM_EFI_VARIABLES_CALL_V2,
                          session_ref, xapidb_vm_ref, data, update_str);
+    INFO("send_to_xapi: v2 API returned status=%d\n", status);
     if (status != HTTP_STATUS_OK)
         goto out;
     if (!xmlrpc_process(response, NULL))

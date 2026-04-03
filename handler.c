@@ -1786,6 +1786,8 @@ do_set_variable(uint8_t *comm_buf)
 
     cert_update = check_authdata_has_latest_cert(name, name_len, data,
                                                  (off_t)data_len);
+    INFO("do_set_variable: name_len=%lu cert_update=%s\n",
+         (unsigned long)name_len, cert_update ? "true(yes)" : "false(no)");
 
     append = !!(attr & EFI_VARIABLE_APPEND_WRITE);
     attr &= ~EFI_VARIABLE_APPEND_WRITE;
@@ -2583,9 +2585,12 @@ check_authdata_has_latest_cert(const uint8_t *name, UINTN name_len,
     }
 
     if (name_len != sizeof(EFI_KEY_EXCHANGE_KEY_NAME) ||
-            memcmp(name, EFI_KEY_EXCHANGE_KEY_NAME, name_len) != 0)
+            memcmp(name, EFI_KEY_EXCHANGE_KEY_NAME, name_len) != 0) {
+        INFO("check_authdata_has_latest_cert: not a KEK write, returning false\n");
         return false;
+    }
 
+    INFO("check_authdata_has_latest_cert: KEK write detected, checking for latest cert\n");
     hdr = (const WIN_CERTIFICATE *)(data + sizeof(EFI_TIME));
     header_len = sizeof(EFI_TIME) + hdr->dwLength;
 
@@ -2597,7 +2602,12 @@ check_authdata_has_latest_cert(const uint8_t *name, UINTN name_len,
     payload = data + header_len;
     payload_len = data_len - header_len;
 
-    return siglist_has_latest_cert(payload, payload_len, 0);
+    {
+        bool result = siglist_has_latest_cert(payload, payload_len, 0);
+        INFO("check_authdata_has_latest_cert: siglist_has_latest_cert=%s\n",
+             result ? "true(has 2023 cert)" : "false(no 2023 cert)");
+        return result;
+    }
 }
 
 /*
