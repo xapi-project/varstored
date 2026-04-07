@@ -464,35 +464,38 @@ int main(int argc, char **argv)
     data = certs_to_sig_list(cert, count, &data_len, vendor_guid);
     signable_data = create_signable_data(name, name_len, guid, attr, &timestamp,
                                          data, data_len, &signable_len);
-    if (signature != NULL) {
-        fseek(signature, 0L, SEEK_END);
-        sig_len = ftell(signature);
-        fseek(signature, 0L, SEEK_SET);
-        sig = malloc(sig_len);
-        if (!sig) {
-            printf("Out of memory!\n");
-            exit(1);
-        }
-        if (fread(sig, 1, sig_len, signature) != sig_len) {
-            printf("Failed to read!\n");
-            exit(1);
-        }
-        fclose(signature);
-    } else
-        sig = sign_data(sign_cert, sign_key, signable_data, signable_len, &sig_len);
-    descriptor = (uint8_t *)create_descriptor(sig_len, &timestamp, &descriptor_len);
 
     out = fopen(out_file, "w");
     if (!out) {
         printf("Failed to open '%s'\n", out_file);
         exit(1);
     }
+
     if (output_signable) {
         if (fwrite(signable_data, 1, signable_len, out) != signable_len) {
             printf("Failed to write!\n");
             exit(1);
         }
     } else {
+        if (signature != NULL) {
+            fseek(signature, 0L, SEEK_END);
+            sig_len = ftell(signature);
+            fseek(signature, 0L, SEEK_SET);
+            sig = malloc(sig_len);
+            if (!sig) {
+                printf("Out of memory!\n");
+                exit(1);
+            }
+            if (fread(sig, 1, sig_len, signature) != sig_len) {
+                printf("Failed to read!\n");
+                exit(1);
+            }
+            fclose(signature);
+        } else
+            sig = sign_data(sign_cert, sign_key, signable_data, signable_len, &sig_len);
+
+        descriptor = (uint8_t *)create_descriptor(sig_len, &timestamp, &descriptor_len);
+
         if (fwrite(descriptor, 1, descriptor_len, out) != descriptor_len) {
             printf("Failed to write!\n");
             exit(1);
@@ -505,13 +508,14 @@ int main(int argc, char **argv)
             printf("Failed to write!\n");
             exit(1);
         }
+
+        free(sig);
+        free(descriptor);
     }
     fclose(out);
 
     free(signable_data);
     free(data);
-    free(sig);
-    free(descriptor);
 
     for (i = 0; i < count; i++)
         X509_free(cert[i]);
