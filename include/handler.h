@@ -34,9 +34,41 @@
 
 #include "efi.h"
 
+#define PAGE_SIZE 4096
+#define SHMEM_PAGES_V1 16
+/* Consumers shouldn't use this value, but should stick to SHMEM_PAGES_V2_MAX */
+#define SHMEM_PAGES_V2_MIN 18
+#define SHMEM_PAGES_V2_MAX 32
+
 #define NAME_LIMIT 4096 /* Maximum length of name */
-#define DATA_LIMIT 57344 /* Maximum length of a single variable */
-#define TOTAL_LIMIT 131072 /* Maximum total storage */
+
+/*
+ * Maximum length of a single variable. To ensure that there's sufficient room
+ * for variables in the communication buffer, SHMEM_PAGES must be high enough to
+ * cover the data limit + 1 page (4096 bytes) for the variable name + 1 page for
+ * protocol overhead.
+ */
+#define DATA_LIMIT(shmem_pages) (((shmem_pages) - 2) * PAGE_SIZE)
+
+/* The following limits must respect the minimum prescribed by WHCP. */
+
+#define DATA_LIMIT_V1 DATA_LIMIT(SHMEM_PAGES_V1)
+/*
+ * For now, DATA_LIMIT_V2 and SHMEM_PAGES_V2_MIN are coupled: DATA_LIMIT_V2 is
+ * calculated from SHMEM_PAGES_V2_MIN, and one can't be increased without
+ * increasing the other.
+ *
+ * However, there's reserved headroom in SHMEM_PAGES_V2_MAX for later silently
+ * increasing DATA_LIMIT_V2; consumers should  stick to SHMEM_PAGES_V2_MAX and
+ * not worry about this.
+ */
+#define DATA_LIMIT_V2 DATA_LIMIT(SHMEM_PAGES_V2_MIN)
+
+/* For non-protocol uses */
+#define DATA_LIMIT_MAX DATA_LIMIT_V2
+
+/* Maximum total storage */
+#define TOTAL_LIMIT 131072
 
 /*
  * A single variable takes up a minimum number of bytes.
@@ -45,10 +77,6 @@
  */
 #define VARIABLE_SIZE_OVERHEAD 128
 #define MAX_VARIABLE_COUNT (TOTAL_LIMIT / VARIABLE_SIZE_OVERHEAD)
-
-#define PAGE_SIZE 4096
-#define SHMEM_PAGES 16
-#define SHMEM_SIZE (SHMEM_PAGES * PAGE_SIZE)
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof(x[0]))
 
@@ -74,6 +102,13 @@ struct efi_variable {
 
 extern struct efi_variable *var_list;
 
+UINTN data_limit(UINT32 version);
+EFI_STATUS snoop_command(uint8_t **comm_buf, UINT32 *out_version,
+                         UINT32 *out_nr_pages, enum command_t *out_command);
+void skip_command(uint8_t **comm_buf, UINT32 version, UINT32 nr_pages,
+                  enum command_t command);
+void dispatch_snooped_command(uint8_t *comm_buf, UINT32 version, UINT32 nr_pages,
+                              enum command_t command);
 void dispatch_command(uint8_t *comm_buf);
 bool setup_crypto(void);
 bool setup_variables(void);

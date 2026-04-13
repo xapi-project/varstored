@@ -49,31 +49,56 @@ static struct {
 static void
 io_port_writel(uint64_t offset, uint64_t size, uint32_t val)
 {
-    xen_pfn_t pfns[SHMEM_PAGES];
+    xen_pfn_t pfns[SHMEM_PAGES_V2_MAX];
     void *shmem;
+    UINT32 version, nr_pages;
+    enum command_t command;
     int i;
+    uint8_t *ptr;
+    EFI_STATUS status;
 
     if (offset != 0 || size != sizeof(uint32_t)) {
         DBG("Expected size 4, offset 0.  Got %" PRIu64 ", %" PRIu64 ".\n", size, offset);
         return;
     }
 
-    for (i = 0; i < SHMEM_PAGES; i++)
+    for (i = 0; i < SHMEM_PAGES_V2_MAX; i++)
         pfns[i] = val + i;
     DBG("io_port write\n");
+
+    /* Only the first page is wanted for nr_pages detection */
+    shmem = xenforeignmemory_map(io_info.fmem,
+                                 io_info.domid,
+                                 PROT_READ | PROT_WRITE,
+                                 1, pfns, NULL);
+    if (!shmem) {
+        DBG("map foreign range failed (snoop): %d\n", errno);
+        return;
+    }
+
+    ptr = shmem;
+    /* nr_pages is the only thing we're interested in here */
+    status = snoop_command(&ptr, &version, &nr_pages, &command);
+
+    xenforeignmemory_unmap(io_info.fmem, shmem, 1);
+
+    if (status != EFI_SUCCESS) {
+        DBG("snoop_command refused version data\n");
+        return;
+    }
 
     shmem = xenforeignmemory_map(io_info.fmem,
                                  io_info.domid,
                                  PROT_READ | PROT_WRITE,
-                                 SHMEM_PAGES, pfns, NULL);
+                                 nr_pages, pfns, NULL);
     if (!shmem) {
         DBG("map foreign range failed: %d\n", errno);
         return;
     }
 
-    dispatch_command(shmem);
+    dispatch_snooped_command(shmem, version, nr_pages, command);
 
-    xenforeignmemory_unmap(io_info.fmem, shmem, SHMEM_PAGES);
+    xenforeignmemory_unmap(io_info.fmem, shmem, nr_pages);
 
 }
 
@@ -85,4 +110,3 @@ setup_handler_io_port(domid_t domid, xenforeignmemory_handle *fmem) {
 
     return register_io_port_writel_handler(HANDLER_PORT_ADDRESS, io_port_writel);
 }
-

@@ -75,6 +75,8 @@
         } \
         break;
 
+extern uint8_t *cmd_buf;
+
 bool tool_init(void);
 void print_efi_error(EFI_STATUS status);
 bool parse_guid(EFI_GUID *guid, const char *guid_str);

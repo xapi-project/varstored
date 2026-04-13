@@ -61,7 +61,6 @@ usage(const char *progname)
 static bool
 do_get(const char *guid_str, const char *name, bool show_attr)
 {
-    uint8_t buf[SHMEM_SIZE];
     uint8_t *ptr;
     uint8_t variable_name[NAME_LIMIT];
     EFI_GUID guid;
@@ -76,17 +75,18 @@ do_get(const char *guid_str, const char *name, bool show_attr)
         return false;
     }
 
-    ptr = buf;
-    serialize_uint32(&ptr, 1); /* version */
+    ptr = cmd_buf;
+    serialize_uint32(&ptr, 2); /* version */
+    serialize_uint32(&ptr, SHMEM_PAGES_V2_MAX); /* nr_pages */
     serialize_uint32(&ptr, COMMAND_GET_VARIABLE);
     serialize_data(&ptr, variable_name, name_size);
     serialize_guid(&ptr, &guid);
-    serialize_uintn(&ptr, DATA_LIMIT);
+    serialize_uintn(&ptr, DATA_LIMIT_V2);
     *ptr = 0;
 
-    dispatch_command(buf);
+    dispatch_command(cmd_buf);
 
-    ptr = buf;
+    ptr = cmd_buf;
     status = unserialize_uintn(&ptr);
     if (status != EFI_SUCCESS) {
         print_efi_error(status);
@@ -110,13 +110,13 @@ do_get(const char *guid_str, const char *name, bool show_attr)
         uint8_t *data;
         UINTN data_len;
 
-        data = unserialize_data(&ptr, &data_len, DATA_LIMIT);
+        data = unserialize_data(&ptr, &data_len, DATA_LIMIT_V2);
         if (!data) {
             if (data_len == 0) {
                 /* The variable is empty - nothing to write out. */
                 return true;
             } else {
-                ERR("Data too large: %lu > %u\n", data_len, DATA_LIMIT);
+                ERR("Data too large: %lu > %u\n", data_len, DATA_LIMIT_V2);
                 return false;
             }
         }

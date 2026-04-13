@@ -65,7 +65,6 @@ static bool
 do_set(const char *guid_str, const char *name, const char *attr_str,
        const char *path)
 {
-    uint8_t buf[SHMEM_SIZE];
     uint8_t *ptr, *data;
     uint8_t variable_name[NAME_LIMIT];
     EFI_GUID guid;
@@ -94,7 +93,7 @@ do_set(const char *guid_str, const char *name, const char *attr_str,
         ERR("Failed to open %s\n", path);
         return false;
     }
-    if (fstat(fileno(f), &st) == -1 || st.st_size > DATA_LIMIT) {
+    if (fstat(fileno(f), &st) == -1 || st.st_size > DATA_LIMIT_V2) {
         printf("Invalid file size\n");
         fclose(f);
         return false;
@@ -113,8 +112,9 @@ do_set(const char *guid_str, const char *name, const char *attr_str,
     }
     fclose(f);
 
-    ptr = buf;
-    serialize_uint32(&ptr, 1); /* version */
+    ptr = cmd_buf;
+    serialize_uint32(&ptr, 2); /* version */
+    serialize_uint32(&ptr, SHMEM_PAGES_V2_MAX); /* nr_pages */
     serialize_uint32(&ptr, COMMAND_SET_VARIABLE);
     serialize_data(&ptr, variable_name, name_size);
     serialize_guid(&ptr, &guid);
@@ -123,9 +123,9 @@ do_set(const char *guid_str, const char *name, const char *attr_str,
     serialize_uint32(&ptr, attr);
     *ptr = 0;
 
-    dispatch_command(buf);
+    dispatch_command(cmd_buf);
 
-    ptr = buf;
+    ptr = cmd_buf;
     status = unserialize_uintn(&ptr);
     if (status != EFI_SUCCESS) {
         print_efi_error(status);

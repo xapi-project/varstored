@@ -79,7 +79,6 @@ print_guid(const EFI_GUID *guid)
 static bool
 do_ls(void)
 {
-    uint8_t buf[SHMEM_SIZE];
     uint8_t name[NAME_LIMIT] = {0};
     uint8_t *ptr;
     EFI_GUID guid = {{0}};
@@ -88,17 +87,18 @@ do_ls(void)
     EFI_STATUS status;
 
     for (;;) {
-        ptr = buf;
-        serialize_uint32(&ptr, 1); /* version */
+        ptr = cmd_buf;
+        serialize_uint32(&ptr, 2); /* version */
+        serialize_uint32(&ptr, SHMEM_PAGES_V2_MAX); /* nr_pages */
         serialize_uint32(&ptr, COMMAND_GET_NEXT_VARIABLE);
         serialize_uintn(&ptr, NAME_LIMIT);
         serialize_data(&ptr, name, size);
         serialize_guid(&ptr, &guid);
         *ptr = 0;
 
-        dispatch_command(buf);
+        dispatch_command(cmd_buf);
 
-        ptr = buf;
+        ptr = cmd_buf;
         status = unserialize_uintn(&ptr);
         if (status == EFI_NOT_FOUND)
             break;

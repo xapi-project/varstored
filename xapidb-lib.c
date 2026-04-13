@@ -556,7 +556,7 @@ unserialize_variables(uint8_t **buf, size_t count, size_t rem)
         rem -= l->name_len;
 
         l->data = unserialize_data(buf, &l->data_len,
-                                   rem < DATA_LIMIT ? rem : DATA_LIMIT);
+                                   rem < DATA_LIMIT_MAX ? rem : DATA_LIMIT_MAX);
         if (!l->data)
             goto invalid;
         rem -= l->data_len;
