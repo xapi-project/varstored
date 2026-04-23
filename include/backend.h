@@ -35,7 +35,20 @@ enum backend_init_status {
     BACKEND_INIT_FAILURE,
     BACKEND_INIT_SUCCESS,
     BACKEND_INIT_FIRSTBOOT,
+    BACKEND_INIT_CERT_UPDATE,
 };
+
+#define EXPIRE_YEAR 2026
+
+enum certificate_current_state {
+    CERT_STATE_UNKNOWN,
+    CERT_STATE_UPDATE_OK,       /* at least one 2023 certificate */
+    CERT_STATE_UPDATE_REQUIRED, /* only 2011 certificate */
+};
+
+#define NOT_EXPIRE(s, e) ((s) <= EXPIRE_YEAR && EXPIRE_YEAR < (e))
+#define EXPIRE_SOON(s, e) ((s) <= EXPIRE_YEAR && (e) == EXPIRE_YEAR)
+#define EXPIRE_PAST(s, e) ((s) <= EXPIRE_YEAR && (e) < EXPIRE_YEAR)
 
 struct backend {
     /* Called to handle arguments specific to the backend. */
@@ -49,7 +62,7 @@ struct backend {
     /* Called to resume from previously saved state. */
     bool (*resume)(void);
     /* Called when set_variable updates an NV variable. */
-    bool (*set_variable)(void);
+    bool (*set_variable)(bool update);
     /* Called when a Secure Boot verification failure occurs. */
     bool (*sb_notify)(void);
 };
@@ -57,5 +70,6 @@ struct backend {
 extern const struct backend *db;
 extern const struct backend xapidb;
 extern const struct backend xapidb_cmdline;
+extern const struct backend xapidb_file;
 
 #endif
