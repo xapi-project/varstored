@@ -30,6 +30,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 #include <errno.h>
 #include <time.h>
 #include <sys/types.h>
@@ -45,6 +46,7 @@
 #include <openssl/evp.h>
 
 #include <debug.h>
+#include <guid.h>
 #include <efi.h>
 #include <handler.h>
 #include <mor.h>
@@ -89,11 +91,12 @@
       "</params>" \
     "</methodCall>"
 
-#define VM_SET_NVRAM_EFI_VARIABLES_CALL \
+#define VM_SET_NVRAM_EFI_VARIABLES_CALL_V2 \
     "<?xml version='1.0'?>" \
     "<methodCall>" \
-      "<methodName>VM.set_NVRAM_EFI_variables</methodName>" \
+      "<methodName>VM.set_NVRAM_EFI_variables_v2</methodName>" \
       "<params>" \
+        "<param><value><string>%s</string></value></param>" \
         "<param><value><string>%s</string></value></param>" \
         "<param><value><string>%s</string></value></param>" \
         "<param><value><string>%s</string></value></param>" \
@@ -129,6 +132,16 @@
     "<methodCall>" \
       "<methodName>session.logout</methodName>" \
       "<params>" \
+        "<param><value><string>%s</string></value></param>" \
+      "</params>" \
+    "</methodCall>"
+
+#define VM_GET_SECUREBOOT_CERTIFICATES_STATE_CALL \
+    "<?xml version='1.0'?>" \
+    "<methodCall>" \
+      "<methodName>VM.get_secureboot_certificates_state</methodName>" \
+      "<params>" \
+        "<param><value><string>%s</string></value></param>" \
         "<param><value><string>%s</string></value></param>" \
       "</params>" \
     "</methodCall>"
@@ -380,11 +393,12 @@ out:
 }
 
 static bool
-send_to_xapi(char *uuid, char *data)
+send_to_xapi(char *uuid, char *data, bool update)
 {
     int status;
     bool ret = false;
     char *session_ref = NULL, *response = NULL;
+    const char *update_str = update ? "yes" : "no";
 
     status = xmlrpc_call(&response, LOGIN_CALL);
     if (status != HTTP_STATUS_OK)
@@ -408,7 +422,9 @@ send_to_xapi(char *uuid, char *data)
         response = NULL;
     }
 
-    status = xmlrpc_call(&response, VM_SET_NVRAM_EFI_VARIABLES_CALL, session_ref, xapidb_vm_ref, data);
+    status = xmlrpc_call(&response,
+                         VM_SET_NVRAM_EFI_VARIABLES_CALL_V2,
+                         session_ref, xapidb_vm_ref, data, update_str);
     if (status != HTTP_STATUS_OK)
         goto out;
     if (!xmlrpc_process(response, NULL))
@@ -482,7 +498,7 @@ base64_encode(const uint8_t *buf, size_t len, char **out)
 }
 
 bool
-xapidb_set_variable(void)
+xapidb_set_variable(bool update)
 {
     uint8_t *buf;
     char *encoded;
@@ -523,7 +539,7 @@ xapidb_set_variable(void)
         last_time = time(NULL);
     }
 
-    ret = send_to_xapi(xapidb_arg_uuid, encoded);
+    ret = send_to_xapi(xapidb_arg_uuid, encoded, update);
     free(encoded);
 
     return ret;
@@ -750,44 +766,102 @@ out:
     return ret;
 }
 
-enum backend_init_status
-xapidb_init(void)
+static bool
+get_secureboot_certificates_state(const char *uuid, char **state_out)
 {
-    char *encoded;
+    int status;
+    bool ret = false;
+    char *session_ref = NULL, *response = NULL;
+
+    *state_out = NULL;
+
+    status = xmlrpc_call(&response, LOGIN_CALL);
+    if (status != HTTP_STATUS_OK)
+        goto out;
+    if (!xmlrpc_process(response, &session_ref))
+        goto out;
+    free(response);
+    response = NULL;
+
+    if (!xapidb_vm_ref) {
+        status = xmlrpc_call(&response, VM_GET_BY_UUID_CALL, session_ref, uuid);
+        if (status != HTTP_STATUS_OK)
+            goto out;
+        if (!xmlrpc_process(response, &xapidb_vm_ref))
+            goto out;
+        free(response);
+        response = NULL;
+    }
+
+    status = xmlrpc_call(&response,
+                         VM_GET_SECUREBOOT_CERTIFICATES_STATE_CALL,
+                         session_ref, xapidb_vm_ref);
+    if (status != HTTP_STATUS_OK)
+        goto out;
+    if (!xmlrpc_process(response, state_out))
+        goto out;
+    free(response);
+    response = NULL;
+
+    status = xmlrpc_call(&response, LOGOUT_CALL, session_ref);
+    if (status != HTTP_STATUS_OK || !xmlrpc_process(response, NULL))
+        goto out;
+
+    ret = true;
+
+out:
+    free(session_ref);
+    free(response);
+    return ret;
+}
+
+static bool
+secureboot_certificates_state_is_update_on_boot(const char *uuid)
+{
+    char *state = NULL;
+    bool result = false;
+
+    if (!get_secureboot_certificates_state(uuid, &state))
+        return false;
+
+    if (state && !strcmp(state, SECUREBOOT_CERT_STATE_UPDATE_ON_BOOT))
+        result = true;
+
+    free(state);
+    return result;
+}
+
+/*
+ * Shared helper: base64-decode `encoded` and parse the resulting NVRAM blob
+ * into the global var_list via xapidb_parse_blob.  Returns true on success.
+ */
+static bool
+decode_and_parse_nvram(const char *encoded)
+{
     uint8_t *buf, *ptr;
     BIO *bio, *b64;
-    bool ret;
     int max_len, n, total = 0;
-
-    ret = get_from_xapi(xapidb_arg_uuid, &encoded);
-    if (!ret)
-        return BACKEND_INIT_FAILURE;
-    if (!encoded)
-        return BACKEND_INIT_FIRSTBOOT;
+    bool ret = false;
 
     max_len = strlen(encoded) * 3 / 4;
-
     buf = malloc(max_len);
     if (!buf) {
         ERR("Failed to allocate memory\n");
-        free(encoded);
-        return BACKEND_INIT_FAILURE;
+        return false;
     }
 
     bio = BIO_new_mem_buf(encoded, -1);
     if (!bio) {
         ERR("Failed to create BIO\n");
-        free(encoded);
         free(buf);
-        return BACKEND_INIT_FAILURE;
+        return false;
     }
     b64 = BIO_new(BIO_f_base64());
     if (!b64) {
         ERR("Failed to create BIO\n");
-        free(encoded);
-        free(buf);
         BIO_free_all(bio);
-        return BACKEND_INIT_FAILURE;
+        free(buf);
+        return false;
     }
     BIO_push(b64, bio);
     BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
@@ -799,11 +873,98 @@ xapidb_init(void)
         total += n;
     }
     BIO_free_all(b64);
-    free(encoded);
 
     ptr = buf;
     ret = xapidb_parse_blob(&ptr, total);
     free(buf);
+    return ret;
+}
+
+
+enum backend_init_status
+xapidb_init(void)
+{
+    char *encoded;
+    bool ret;
+
+    ret = get_from_xapi(xapidb_arg_uuid, &encoded);
+    if (!ret)
+        return BACKEND_INIT_FAILURE;
+    if (!encoded)
+        return BACKEND_INIT_FIRSTBOOT;
+
+    ret = decode_and_parse_nvram(encoded);
+    free(encoded);
+
+    if (!ret)
+        return BACKEND_INIT_FAILURE;
+
+    if (xapidb_arg_uuid &&
+            secureboot_certificates_state_is_update_on_boot(xapidb_arg_uuid))
+        return BACKEND_INIT_CERT_UPDATE;
+
+    return BACKEND_INIT_SUCCESS;
+}
+
+/*
+ * Initialise the variable store from a local file containing a
+ * base64-encoded NVRAM blob (the same format returned by XAPI).
+ * The file path is taken from xapidb_arg_init.
+ */
+enum backend_init_status
+xapidb_file_init(void)
+{
+    struct stat st;
+    FILE *f;
+    char *encoded;
+    size_t n;
+    bool ret;
+
+    if (!xapidb_arg_init) {
+        ERR("No NVRAM file path specified\n");
+        return BACKEND_INIT_FAILURE;
+    }
+
+    if (stat(xapidb_arg_init, &st) == -1) {
+        ERR("Failed to stat '%s': %s\n", xapidb_arg_init, strerror(errno));
+        return BACKEND_INIT_FAILURE;
+    }
+
+    f = fopen(xapidb_arg_init, "r");
+    if (!f) {
+        ERR("Failed to open '%s': %s\n", xapidb_arg_init, strerror(errno));
+        return BACKEND_INIT_FAILURE;
+    }
+
+    encoded = malloc(st.st_size + 1);
+    if (!encoded) {
+        ERR("Failed to allocate memory\n");
+        fclose(f);
+        return BACKEND_INIT_FAILURE;
+    }
+
+    n = fread(encoded, 1, st.st_size, f);
+    fclose(f);
+
+    if ((off_t)n != st.st_size) {
+        ERR("Failed to read '%s'\n", xapidb_arg_init);
+        free(encoded);
+        return BACKEND_INIT_FAILURE;
+    }
+
+    /* Strip trailing whitespace (e.g. newline added by text editors). */
+    while (n > 0 && isspace((unsigned char)encoded[n - 1]))
+        n--;
+
+    encoded[n] = '\0';
+
+    if (n == 0) {
+        free(encoded);
+        return BACKEND_INIT_FIRSTBOOT;
+    }
+
+    ret = decode_and_parse_nvram(encoded);
+    free(encoded);
 
     return ret ? BACKEND_INIT_SUCCESS : BACKEND_INIT_FAILURE;
 }
