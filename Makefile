@@ -64,7 +64,9 @@ $(TARGET): $(LIBS) $(OBJS)
 
 TOOLLIBS := -lcrypto -lseccomp $$(pkg-config --libs libxml-2.0)
 TOOLOBJS := tools/xapidb-cmdline.o \
+            tools/xapidb-file.o \
             tools/tool-lib.o \
+            cert-check.o \
             depriv.o \
             guid.o \
             handler.o \
@@ -75,7 +77,9 @@ TOOLS := tools/varstore-ls \
          tools/varstore-get \
          tools/varstore-rm \
          tools/varstore-set \
-         tools/varstore-sb-state
+         tools/varstore-sb-state \
+         tools/varstore-nvram-certcheck \
+         tools/varstore-authfile-certcheck
 
 tools: $(TOOLS)
 
@@ -87,8 +91,8 @@ $(TOOLS): %: $(TOOLOBJS) %.o
 test.o: test.c
 	$(CC) -o $@ $(CFLAGS) $$(pkg-config --cflags glib-2.0) -c $<
 
-test: test.o guid.o
-	$(CC) -o $@ $(LDFLAGS) $^ -lcrypto $$(pkg-config --libs glib-2.0)
+test: test.o guid.o ppi_vdata.o
+	$(CC) -o $@ $(LDFLAGS) $^ -lcrypto $$(pkg-config --libs glib-2.0 libxml-2.0)
 
 TESTKEYS := testPK.pem testPK.key testcertA.pem testcertA.key testcertB.pem testcertB.key
 
