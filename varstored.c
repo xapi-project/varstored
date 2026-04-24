@@ -69,6 +69,7 @@
 #include <mor.h>
 #include <ppi.h>
 #include <backend.h>
+#include <xapidb.h>
 
 #include "io_port.h"
 #include "option.h"
@@ -527,6 +528,11 @@ varstored_initialize(domid_t domid)
         if (status == BACKEND_INIT_FIRSTBOOT) {
             if (!setup_keys()) {
                 ERR("Failed to setup keys\n");
+                goto err;
+            }
+        } else if (status == BACKEND_INIT_CERT_UPDATE) {
+            if (!setup_keys_for_cert_update()) {
+                ERR("Failed to update certificates\n");
                 goto err;
             }
         }
