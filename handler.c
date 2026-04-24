@@ -80,6 +80,7 @@
 #include <guid.h>
 #include <serialize.h>
 #include <handler.h>
+#include <xapidb.h>
 #include <mor.h>
 #include <ppi.h>
 
@@ -126,7 +127,7 @@ static const uint8_t EFI_SETUP_MODE_NAME[] = {'S',0,'e',0,'t',0,'u',0,'p',0,'M',
 static const uint8_t EFI_AUDIT_MODE_NAME[] = {'A',0,'u',0,'d',0,'i',0,'t',0,'M',0,'o',0,'d',0,'e',0};
 static const uint8_t EFI_DEPLOYED_MODE_NAME[] = {'D',0,'e',0,'p',0,'l',0,'o',0,'y',0,'e',0,'d',0,'M',0,'o',0,'d',0,'e',0};
 static const uint8_t EFI_PLATFORM_KEY_NAME[] = {'P',0,'K',0};
-static const uint8_t EFI_KEY_EXCHANGE_KEY_NAME[] = {'K',0,'E',0,'K',0};
+const uint8_t EFI_KEY_EXCHANGE_KEY_NAME[] = {'K',0,'E',0,'K',0};
 static const uint8_t EFI_SECURE_BOOT_MODE_NAME[] = {'S',0,'e',0,'c',0,'u',0,'r',0,'e',0,'B',0,'o',0,'o',0,'t',0};
 static const uint8_t EFI_SIGNATURE_SUPPORT_NAME[] = {'S',0,'i',0,'g',0,'n',0,'a',0,'t',0,'u',0,'r',0,'e',0,'S',0,'u',0,'p',0,'p',0,'o',0,'r',0,'t',0};
 
@@ -196,6 +197,203 @@ get_space_usage(void)
     }
 
     return total;
+}
+
+/*
+ * Parse an ASN1_TIME into year, month, day components.
+ * Returns true on success.
+ */
+static bool
+parse_asn1_time(const ASN1_TIME *atime, int *year, int *month, int *day)
+{
+    struct tm tm_val = {0};
+
+    if (!atime)
+        return false;
+
+    if (ASN1_TIME_to_tm(atime, &tm_val) != 1)
+        return false;
+
+    *year = tm_val.tm_year + 1900;
+    *month = tm_val.tm_mon + 1;
+    *day = tm_val.tm_mday;
+    return true;
+}
+
+/*
+ * Parse X.509 certificates from EFI signature list data.
+ * For each X.509 signature list entry, iterate through the individual
+ * signature data entries, parse each DER-encoded certificate using OpenSSL,
+ * and extract the subject, issue date and expiry date.
+ *
+ * If certs is non-NULL and max_certs > 0, fills in cert_info structs.
+ * Returns the total count of X.509 certificates, or -1 on error.
+ */
+int
+parse_certs_from_siglist(const uint8_t *data, UINTN data_len,
+                            struct cert_info *certs, int max_certs,
+                            int verbose)
+{
+    int count = 0;
+    UINTN offset = 0;
+
+    while (offset + sizeof(EFI_SIGNATURE_LIST) <= data_len) {
+        const EFI_SIGNATURE_LIST *siglist =
+            (const EFI_SIGNATURE_LIST *)(data + offset);
+        UINT32 sig_list_size = siglist->SignatureListSize;
+        UINT32 sig_header_size = siglist->SignatureHeaderSize;
+        UINT32 sig_size = siglist->SignatureSize;
+        UINTN sig_data_offset;
+
+        if (sig_list_size == 0 || sig_list_size > data_len - offset)
+            return -1;
+
+        if (memcmp(&siglist->SignatureType, &gEfiCertX509Guid, GUID_LEN)) {
+            offset += sig_list_size;
+            continue;
+        }
+
+        /* Start of signature data entries */
+        sig_data_offset = offset + sizeof(EFI_SIGNATURE_LIST) + sig_header_size;
+
+        if (sig_size < EFI_SIG_DATA_SIZE)
+            return -1;
+
+        /* Iterate each EFI_SIGNATURE_DATA in this list */
+        while (sig_data_offset + sig_size <= offset + sig_list_size) {
+            const uint8_t *cert_der;
+            UINTN cert_der_len;
+            X509 *x509;
+
+            /* Skip SignatureOwner GUID to get to the DER certificate */
+            cert_der = data + sig_data_offset + EFI_SIG_DATA_SIZE;
+            cert_der_len = sig_size - EFI_SIG_DATA_SIZE;
+
+            x509 = d2i_X509(NULL, &cert_der, (long)cert_der_len);
+            if (x509) {
+                const ASN1_TIME *not_before = X509_get0_notBefore(x509);
+                const ASN1_TIME *not_after = X509_get0_notAfter(x509);
+                char subject_buf[MAX_CERT_SUBJECT];
+
+                X509_NAME_oneline(X509_get_subject_name(x509),
+                                  subject_buf, sizeof(subject_buf));
+
+                if (certs && count < max_certs) {
+                    struct cert_info *ci = &certs[count];
+
+                    snprintf(ci->subject, sizeof(ci->subject), "%s",
+                             subject_buf);
+
+                    if (!parse_asn1_time(not_before,
+                                         &ci->not_before_year,
+                                         &ci->not_before_month,
+                                         &ci->not_before_day)) {
+                        ci->not_before_year = 0;
+                        ci->not_before_month = 0;
+                        ci->not_before_day = 0;
+                    }
+                    if (!parse_asn1_time(not_after,
+                                         &ci->not_after_year,
+                                         &ci->not_after_month,
+                                         &ci->not_after_day)) {
+                        ci->not_after_year = 0;
+                        ci->not_after_month = 0;
+                        ci->not_after_day = 0;
+                    }
+                }
+
+                if (verbose)
+                    INFO("  cert[%d]: subject=%s, "
+                         "notBefore=%04d-%02d-%02d, "
+                         "notAfter=%04d-%02d-%02d\n",
+                         count, subject_buf,
+                         certs && count < max_certs ?
+                             certs[count].not_before_year : 0,
+                         certs && count < max_certs ?
+                             certs[count].not_before_month : 0,
+                         certs && count < max_certs ?
+                             certs[count].not_before_day : 0,
+                         certs && count < max_certs ?
+                             certs[count].not_after_year : 0,
+                         certs && count < max_certs ?
+                             certs[count].not_after_month : 0,
+                         certs && count < max_certs ?
+                             certs[count].not_after_day : 0);
+
+                X509_free(x509);
+                count++;
+            } else {
+                if (verbose)
+                    INFO("Failed to parse X.509 certificate at offset %lu\n",
+                        sig_data_offset);
+            }
+
+            sig_data_offset += sig_size;
+        }
+
+        offset += sig_list_size;
+    }
+
+    return count;
+}
+
+/*
+ * Check whether the given signature list data contains a latest-era certificate,
+ * i.e. one issued in 2023 and expiring in 2038.
+ * Returns true if such a certificate is found.
+ */
+static bool
+siglist_has_latest_cert(const uint8_t *data, UINTN data_len, int verbose)
+{
+    struct cert_info certs[MAX_CERTS_IN_SIGLIST];
+    int count, i;
+
+    count = parse_certs_from_siglist(data, data_len,
+                                        certs, MAX_CERTS_IN_SIGLIST,
+                                        verbose);
+    if (count <= 0)
+        return false;
+
+    for (i = 0; i < count && i < MAX_CERTS_IN_SIGLIST; i++) {
+        if (NOT_EXPIRE(certs[i].not_before_year, certs[i].not_after_year))
+            return true;
+    }
+
+    return false;
+}
+
+
+/*
+ * Check whether both KEK and db in the loaded variable store contain at least
+ * one up-to-date certificate (i.e. one that satisfies NOT_EXPIRE). Both
+ * variables must be present and up-to-date for true to be returned.
+ */
+static bool
+check_kek_and_db_uptodate(void)
+{
+    uint8_t *kek_data = NULL, *db_data = NULL;
+    UINTN kek_len = 0, db_len = 0;
+    bool result = false;
+
+    if (internal_get_variable(EFI_KEY_EXCHANGE_KEY_NAME,
+                              sizeof(EFI_KEY_EXCHANGE_KEY_NAME),
+                              &gEfiGlobalVariableGuid,
+                              &kek_data, &kek_len) != EFI_SUCCESS)
+        goto out;
+
+    if (internal_get_variable(EFI_IMAGE_SECURITY_DATABASE,
+                              sizeof(EFI_IMAGE_SECURITY_DATABASE),
+                              &gEfiImageSecurityDatabaseGuid,
+                              &db_data, &db_len) != EFI_SUCCESS)
+        goto out;
+
+    result = siglist_has_latest_cert(kek_data, kek_len, 0) &&
+             siglist_has_latest_cert(db_data, db_len, 0);
+
+out:
+    free(kek_data);
+    free(db_data);
+    return result;
 }
 
 /* A limited version of SetVariable for internal use. */
@@ -400,7 +598,7 @@ X509_get_tbs_cert(X509 *cert, uint8_t **tbs_cert, UINTN *tbs_len)
 static EFI_STATUS
 sha256_sig(STACK_OF(X509) *certs, X509 *top_level_cert, uint8_t *digest)
 {
-    SHA256_CTX ctx;
+    EVP_MD_CTX *ctx;
     char name[128];
     X509_NAME *x509_name;
     uint8_t *tbs_cert;
@@ -423,19 +621,25 @@ sha256_sig(STACK_OF(X509) *certs, X509 *top_level_cert, uint8_t *digest)
         return status;
 
     status = EFI_DEVICE_ERROR;
-    if (!SHA256_Init(&ctx))
+    ctx = EVP_MD_CTX_new();
+    if (!ctx)
         goto out;
 
-    if (!SHA256_Update(&ctx, name, strlen(name)))
-        goto out;
+    if (!EVP_DigestInit_ex(ctx, EVP_sha256(), NULL))
+        goto out_ctx;
 
-    if (!SHA256_Update(&ctx, tbs_cert, tbs_cert_len))
-        goto out;
+    if (!EVP_DigestUpdate(ctx, name, strlen(name)))
+        goto out_ctx;
 
-    if (!SHA256_Final(digest, &ctx))
-        goto out;
+    if (!EVP_DigestUpdate(ctx, tbs_cert, tbs_cert_len))
+        goto out_ctx;
+
+    if (!EVP_DigestFinal_ex(ctx, digest, NULL))
+        goto out_ctx;
 
     status = EFI_SUCCESS;
+out_ctx:
+    EVP_MD_CTX_free(ctx);
 out:
     free(tbs_cert);
     return status;
@@ -764,8 +968,6 @@ check_signature_list_format(uint8_t *data, UINTN data_len, bool is_pk)
             UINTN cert_len;
             X509 *cert;
             EVP_PKEY *pkey;
-            RSA *ctx;
-            bool fail;
             EFI_SIGNATURE_DATA *cert_data =
                     (EFI_SIGNATURE_DATA *)((uint8_t *)sig_list +
                     sizeof(EFI_SIGNATURE_LIST) + sig_list->SignatureHeaderSize);
@@ -781,16 +983,12 @@ check_signature_list_format(uint8_t *data, UINTN data_len, bool is_pk)
                     return EFI_INVALID_PARAMETER;
                 pkey = X509_get_pubkey(cert);
                 if (!pkey || EVP_PKEY_id(pkey) != EVP_PKEY_RSA) {
+                    EVP_PKEY_free(pkey);
                     X509_free(cert);
                     return EFI_INVALID_PARAMETER;
                 }
-                ctx = EVP_PKEY_get1_RSA(pkey);
-                fail = ctx == NULL;
-                RSA_free(ctx);
                 EVP_PKEY_free(pkey);
                 X509_free(cert);
-                if (fail)
-                    return EFI_INVALID_PARAMETER;
                 cert_data = (void *)cert_data + sig_list->SignatureSize;
             }
         }
@@ -1807,7 +2005,7 @@ do_set_variable(uint8_t *comm_buf)
             }
             free(name);
             if (should_save && persistent) {
-                if (!db->set_variable()) {
+                if (!db->set_variable(check_kek_and_db_uptodate())) {
                     /* efivar delete and append/update case */
                     rollback_var->next = l->next;
                     if (prev)
@@ -1894,7 +2092,7 @@ do_set_variable(uint8_t *comm_buf)
         l->next = var_list;
         var_list = l;
         if ((attr & EFI_VARIABLE_NON_VOLATILE) && persistent) {
-            if (!db->set_variable()) {
+            if (!db->set_variable(check_kek_and_db_uptodate())) {
                 /* remove var inserted to head */
                 var_list = l->next;
 
@@ -2180,6 +2378,54 @@ set_variable_from_auth(const uint8_t *name, UINTN name_len, const EFI_GUID *guid
     return true;
 }
 
+/*
+ * Delete the PK to transition the platform to setup mode (SetupMode=1).
+ *
+ * The PK is a time-based authenticated variable, so the command must carry
+ * an EFI_VARIABLE_AUTHENTICATION_2 header even when the payload is empty.
+ * Auth enforcement is temporarily disabled for this step since we are
+ * initiating a host-driven certificate update and do not hold the PK
+ * private key needed to sign the deletion request.
+ */
+static bool
+enter_setup_mode(void)
+{
+    uint8_t buf[SHMEM_SIZE];
+    uint8_t *ptr;
+    EFI_VARIABLE_AUTHENTICATION_2 auth2 = {{0}};
+    bool saved_auth_enforce;
+    EFI_STATUS status;
+
+    auth2.AuthInfo.Hdr.wCertificateType = WIN_CERT_TYPE_EFI_GUID;
+    auth2.AuthInfo.Hdr.dwLength = offsetof(WIN_CERTIFICATE_UEFI_GUID, CertData);
+    memcpy(&auth2.AuthInfo.CertType, &gEfiCertPkcs7Guid, GUID_LEN);
+
+    ptr = buf;
+    serialize_uint32(&ptr, 1); /* version */
+    serialize_uint32(&ptr, COMMAND_SET_VARIABLE);
+    serialize_data(&ptr, EFI_PLATFORM_KEY_NAME, sizeof(EFI_PLATFORM_KEY_NAME));
+    serialize_guid(&ptr, &gEfiGlobalVariableGuid);
+    serialize_data(&ptr, (uint8_t *)&auth2,
+                   offsetof(EFI_VARIABLE_AUTHENTICATION_2, AuthInfo.CertData));
+    serialize_uint32(&ptr, ATTR_BRNV_TIME);
+    *ptr = 0; /* at_runtime */
+
+    saved_auth_enforce = auth_enforce;
+    auth_enforce = false;
+    dispatch_command(buf);
+    auth_enforce = saved_auth_enforce;
+
+    ptr = buf;
+    status = unserialize_uintn(&ptr);
+    /* EFI_NOT_FOUND: PK already absent — platform is already in setup mode. */
+    if (status != EFI_SUCCESS && status != EFI_NOT_FOUND) {
+        ERR("Failed to delete PK: 0x%lx\n", status);
+        return false;
+    }
+
+    return true;
+}
+
 bool
 setup_keys(void)
 {
@@ -2202,7 +2448,7 @@ setup_keys(void)
              * KEK/db set which will cause in-guest dbx updates to fail.
              */
             WARN("Aborting keys setup\n");
-            return true;
+            return false;
         }
 
         INFO("Setting %s...\n", auth_info[i].pretty_name);
@@ -2211,11 +2457,40 @@ setup_keys(void)
                                     auth_info[i].guid,
                                     auth_info[i].data,
                                     auth_info[i].data_len,
-                                    auth_info[i].append))
+                                    auth_info[i].append)) {
             return false;
+        }
     }
 
     return true;
+}
+
+bool
+setup_keys_for_cert_update(void)
+{
+    int i;
+
+    /*
+     * Verify all required auth blobs are available before making any
+     * persistent changes.  This avoids leaving the platform stranded in
+     * setup mode if a required file is missing.
+     */
+    for (i = 0; i < ARRAY_SIZE(auth_info); i++) {
+        if (auth_info[i].required && !auth_info[i].data) {
+            WARN("Cannot update certs: %s auth data is missing\n",
+                 auth_info[i].pretty_name);
+            return false;
+        }
+    }
+
+    /*
+     * Delete the PK to put the platform into setup mode, then install all
+     * keys from scratch, identically to the initial setup path.
+     */
+    if (!enter_setup_mode())
+        return false;
+
+    return setup_keys();
 }
 
 static bool
@@ -2296,4 +2571,39 @@ free_auth_data(void)
         free(auth_info[i].data);
         auth_info[i].data = NULL;
     }
+}
+
+/*
+ * Check whether the local auth files contain updated (2023) certificates.
+ * This checks the KEK.auth file payload for multiple X.509 certificates.
+ * Returns true if the local auth files are updated.
+ */
+bool
+check_local_auth_updated(int verbose)
+{
+    /* auth_info[2] is KEK */
+    const uint8_t *auth_data = auth_info[2].data;
+    off_t auth_len = auth_info[2].data_len;
+    const WIN_CERTIFICATE *hdr;
+    UINTN header_len;
+    const uint8_t *payload;
+    UINTN payload_len;
+
+    if (!auth_data || auth_len == 0)
+        return false;
+
+    /* Skip past EFI_VARIABLE_AUTHENTICATION_2 header */
+    if (auth_len < (off_t)(sizeof(EFI_TIME) + sizeof(WIN_CERTIFICATE)))
+        return false;
+
+    hdr = (const WIN_CERTIFICATE *)(auth_data + sizeof(EFI_TIME));
+    header_len = sizeof(EFI_TIME) + hdr->dwLength;
+
+    if (header_len >= (UINTN)auth_len)
+        return false;
+
+    payload = auth_data + header_len;
+    payload_len = auth_len - header_len;
+
+    return siglist_has_latest_cert(payload, payload_len, verbose);
 }

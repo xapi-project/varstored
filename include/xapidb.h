@@ -63,6 +63,6 @@ bool xapidb_parse_blob(uint8_t **buf, int len);
 enum backend_init_status xapidb_init(void);
 enum backend_init_status xapidb_file_init(void);
 bool xapidb_sb_notify(void);
-bool secureboot_certificates_state_is_update_on_boot(const char *uuid);
+
 
 #endif

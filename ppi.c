@@ -165,7 +165,7 @@ ppi_data_port_writel(uint64_t offset, uint64_t size, uint32_t val)
                                               ATTR_BRNV);
                 free(data);
                 if (status == EFI_SUCCESS) {
-                    db->set_variable();
+                    db->set_variable(false);
                 } else {
                     ERR("Set variable failure 0x%016lx!\n", status);
                 }

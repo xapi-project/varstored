@@ -78,6 +78,7 @@ void dispatch_command(uint8_t *comm_buf);
 bool setup_crypto(void);
 bool setup_variables(void);
 bool setup_keys(void);
+bool setup_keys_for_cert_update(void);
 bool load_auth_data(void);
 void free_auth_data(void);
 
@@ -90,9 +91,29 @@ internal_get_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
 
 extern const uint8_t TCG2_PHYSICAL_PRESENCEFLAGSLOCK_NAME[];
 extern const size_t TCG2_PHYSICAL_PRESENCEFLAGSLOCK_NAME_SIZE;
+extern const uint8_t EFI_KEY_EXCHANGE_KEY_NAME[];
+#define EFI_KEY_EXCHANGE_KEY_NAME_LEN 6
 
 extern bool secure_boot_enable;
 extern bool auth_enforce;
 extern bool persistent;
+
+#define MAX_CERT_SUBJECT 256
+#define MAX_CERTS_IN_SIGLIST 32
+
+struct cert_info {
+    char subject[MAX_CERT_SUBJECT];
+    int not_before_year;
+    int not_before_month;
+    int not_before_day;
+    int not_after_year;
+    int not_after_month;
+    int not_after_day;
+};
+
+int parse_certs_from_siglist(const uint8_t *data, UINTN data_len,
+                             struct cert_info *certs, int max_certs,
+                             int verbose);
+bool check_local_auth_updated(int verbose);
 
 #endif
