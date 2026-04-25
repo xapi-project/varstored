@@ -445,6 +445,23 @@ internal_set_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
     return EFI_SUCCESS;
 }
 
+static struct efi_variable *
+find_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid)
+{
+    struct efi_variable *l;
+
+    l = var_list;
+    while (l) {
+        if (l->name_len == name_len &&
+                !memcmp(l->name, name, name_len) &&
+                !memcmp(&l->guid, guid, GUID_LEN))
+            return l;
+        l = l->next;
+    }
+
+    return NULL;
+}
+
 /* A limited version of GetVariable for internal use. */
 EFI_STATUS
 internal_get_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
@@ -893,6 +910,46 @@ static bool time_later(EFI_TIME *a, EFI_TIME *b)
         return b->Minute > a->Minute;
     else
         return b->Second > a->Second;
+}
+
+static bool
+increment_time(EFI_TIME *timestamp)
+{
+    if (timestamp->Second < 59) {
+        timestamp->Second++;
+        return true;
+    }
+    timestamp->Second = 0;
+
+    if (timestamp->Minute < 59) {
+        timestamp->Minute++;
+        return true;
+    }
+    timestamp->Minute = 0;
+
+    if (timestamp->Hour < 23) {
+        timestamp->Hour++;
+        return true;
+    }
+    timestamp->Hour = 0;
+
+    if (timestamp->Day < 31) {
+        timestamp->Day++;
+        return true;
+    }
+    timestamp->Day = 1;
+
+    if (timestamp->Month < 12) {
+        timestamp->Month++;
+        return true;
+    }
+    timestamp->Month = 1;
+
+    if (timestamp->Year == (UINT16)~0)
+        return false;
+
+    timestamp->Year++;
+    return true;
 }
 
 enum auth_type {
@@ -2379,51 +2436,185 @@ set_variable_from_auth(const uint8_t *name, UINTN name_len, const EFI_GUID *guid
 }
 
 /*
- * Delete the PK to transition the platform to setup mode (SetupMode=1).
+ * Delete the PK to transition the platform to setup mode (SetupMode=1)
+ * without disabling auth enforcement.
  *
- * The PK is a time-based authenticated variable, so the command must carry
- * an EFI_VARIABLE_AUTHENTICATION_2 header even when the payload is empty.
- * Auth enforcement is temporarily disabled for this step since we are
- * initiating a host-driven certificate update and do not hold the PK
- * private key needed to sign the deletion request.
+ * The PK delete is issued after moving the internal mode variables to setup
+ * mode so that PK verification uses the setup-mode payload path. The command
+ * reuses the PKCS#7 envelope from the loaded PK auth blob and uses a
+ * timestamp later than the current PK timestamp to satisfy time-based auth
+ * checks.
  */
 static bool
 enter_setup_mode(void)
 {
     uint8_t buf[SHMEM_SIZE];
+    uint8_t *auth = NULL;
     uint8_t *ptr;
-    EFI_VARIABLE_AUTHENTICATION_2 auth2 = {{0}};
-    bool saved_auth_enforce;
+    struct efi_variable *pk, *setup_mode_var, *deployed_mode_var, *secure_boot_var;
+    const struct auth_info *pk_auth_info = &auth_info[ARRAY_SIZE(auth_info) - 1];
+    EFI_VARIABLE_AUTHENTICATION_2 *auth2;
+    UINTN auth_len;
+    uint8_t saved_setup_mode, saved_deployed_mode, saved_secure_boot;
+    uint8_t setup_mode = 1, deployed_mode = 0, secure_boot = 0;
+    bool changed_mode = false;
     EFI_STATUS status;
 
-    auth2.AuthInfo.Hdr.wCertificateType = WIN_CERT_TYPE_EFI_GUID;
-    auth2.AuthInfo.Hdr.dwLength = offsetof(WIN_CERTIFICATE_UEFI_GUID, CertData);
-    memcpy(&auth2.AuthInfo.CertType, &gEfiCertPkcs7Guid, GUID_LEN);
+    pk = find_variable(EFI_PLATFORM_KEY_NAME, sizeof(EFI_PLATFORM_KEY_NAME),
+                       &gEfiGlobalVariableGuid);
+    setup_mode_var = find_variable(EFI_SETUP_MODE_NAME, sizeof(EFI_SETUP_MODE_NAME),
+                                   &gEfiGlobalVariableGuid);
+    deployed_mode_var = find_variable(EFI_DEPLOYED_MODE_NAME,
+                                      sizeof(EFI_DEPLOYED_MODE_NAME),
+                                      &gEfiGlobalVariableGuid);
+    secure_boot_var = find_variable(EFI_SECURE_BOOT_MODE_NAME,
+                                    sizeof(EFI_SECURE_BOOT_MODE_NAME),
+                                    &gEfiGlobalVariableGuid);
+    if (!setup_mode_var || !deployed_mode_var || !secure_boot_var) {
+        ERR("Missing secure boot mode variables while entering setup mode\n");
+        return false;
+    }
+
+    if (setup_mode_var->data_len != 1 || deployed_mode_var->data_len != 1 ||
+            secure_boot_var->data_len != 1) {
+        ERR("Invalid secure boot mode variable size while entering setup mode\n");
+        return false;
+    }
+
+    saved_setup_mode = setup_mode_var->data[0];
+    saved_deployed_mode = deployed_mode_var->data[0];
+    saved_secure_boot = secure_boot_var->data[0];
+
+    if (saved_setup_mode != 1) {
+        status = internal_set_variable(EFI_SETUP_MODE_NAME,
+                                       sizeof(EFI_SETUP_MODE_NAME),
+                                       &gEfiGlobalVariableGuid,
+                                       &setup_mode,
+                                       sizeof(setup_mode),
+                                       ATTR_BR);
+        if (status != EFI_SUCCESS) {
+            ERR("Failed to set SetupMode before deleting PK: 0x%llx\n", status);
+            return false;
+        }
+
+        status = internal_set_variable(EFI_DEPLOYED_MODE_NAME,
+                                       sizeof(EFI_DEPLOYED_MODE_NAME),
+                                       &gEfiGlobalVariableGuid,
+                                       &deployed_mode,
+                                       sizeof(deployed_mode),
+                                       ATTR_BR);
+        if (status != EFI_SUCCESS) {
+            ERR("Failed to set DeployedMode before deleting PK: 0x%llx\n", status);
+            internal_set_variable(EFI_SETUP_MODE_NAME,
+                                  sizeof(EFI_SETUP_MODE_NAME),
+                                  &gEfiGlobalVariableGuid,
+                                  &saved_setup_mode,
+                                  sizeof(saved_setup_mode),
+                                  ATTR_BR);
+            return false;
+        }
+
+        status = internal_set_variable(EFI_SECURE_BOOT_MODE_NAME,
+                                       sizeof(EFI_SECURE_BOOT_MODE_NAME),
+                                       &gEfiGlobalVariableGuid,
+                                       &secure_boot,
+                                       sizeof(secure_boot),
+                                       ATTR_BR);
+        if (status != EFI_SUCCESS) {
+            ERR("Failed to set SecureBoot before deleting PK: 0x%llx\n", status);
+            internal_set_variable(EFI_DEPLOYED_MODE_NAME,
+                                  sizeof(EFI_DEPLOYED_MODE_NAME),
+                                  &gEfiGlobalVariableGuid,
+                                  &saved_deployed_mode,
+                                  sizeof(saved_deployed_mode),
+                                  ATTR_BR);
+            internal_set_variable(EFI_SETUP_MODE_NAME,
+                                  sizeof(EFI_SETUP_MODE_NAME),
+                                  &gEfiGlobalVariableGuid,
+                                  &saved_setup_mode,
+                                  sizeof(saved_setup_mode),
+                                  ATTR_BR);
+            return false;
+        }
+
+        changed_mode = true;
+    }
+
+    if (!pk_auth_info->data ||
+            pk_auth_info->data_len < offsetof(EFI_VARIABLE_AUTHENTICATION_2,
+                                              AuthInfo.CertData)) {
+        ERR("Missing PK auth data while entering setup mode\n");
+        goto restore_mode;
+    }
+
+    auth2 = (EFI_VARIABLE_AUTHENTICATION_2 *)pk_auth_info->data;
+    auth_len = offsetof(EFI_VARIABLE_AUTHENTICATION_2, AuthInfo) +
+               auth2->AuthInfo.Hdr.dwLength;
+    if (pk_auth_info->data_len < auth_len) {
+        ERR("Invalid PK auth data while entering setup mode\n");
+        goto restore_mode;
+    }
+
+    auth = malloc(auth_len);
+    if (!auth)
+        goto restore_mode;
+    memcpy(auth, pk_auth_info->data, auth_len);
+    auth2 = (EFI_VARIABLE_AUTHENTICATION_2 *)auth;
+
+    if (pk) {
+        auth2->TimeStamp = pk->timestamp;
+        if (!increment_time(&auth2->TimeStamp)) {
+            ERR("Failed to advance PK timestamp for setup mode transition\n");
+            free(auth);
+            goto restore_mode;
+        }
+    }
 
     ptr = buf;
     serialize_uint32(&ptr, 1); /* version */
     serialize_uint32(&ptr, COMMAND_SET_VARIABLE);
     serialize_data(&ptr, EFI_PLATFORM_KEY_NAME, sizeof(EFI_PLATFORM_KEY_NAME));
     serialize_guid(&ptr, &gEfiGlobalVariableGuid);
-    serialize_data(&ptr, (uint8_t *)&auth2,
-                   offsetof(EFI_VARIABLE_AUTHENTICATION_2, AuthInfo.CertData));
+    serialize_data(&ptr, auth, auth_len);
     serialize_uint32(&ptr, ATTR_BRNV_TIME);
     *ptr = 0; /* at_runtime */
 
-    saved_auth_enforce = auth_enforce;
-    auth_enforce = false;
     dispatch_command(buf);
-    auth_enforce = saved_auth_enforce;
+    free(auth);
 
     ptr = buf;
     status = unserialize_uintn(&ptr);
     /* EFI_NOT_FOUND: PK already absent — platform is already in setup mode. */
     if (status != EFI_SUCCESS && status != EFI_NOT_FOUND) {
-        ERR("Failed to delete PK: 0x%lx\n", status);
-        return false;
+        ERR("Failed to delete PK: 0x%llx\n", status);
+        goto restore_mode;
     }
 
     return true;
+
+restore_mode:
+    if (changed_mode) {
+        internal_set_variable(EFI_SECURE_BOOT_MODE_NAME,
+                              sizeof(EFI_SECURE_BOOT_MODE_NAME),
+                              &gEfiGlobalVariableGuid,
+                              &saved_secure_boot,
+                              sizeof(saved_secure_boot),
+                              ATTR_BR);
+        internal_set_variable(EFI_DEPLOYED_MODE_NAME,
+                              sizeof(EFI_DEPLOYED_MODE_NAME),
+                              &gEfiGlobalVariableGuid,
+                              &saved_deployed_mode,
+                              sizeof(saved_deployed_mode),
+                              ATTR_BR);
+        internal_set_variable(EFI_SETUP_MODE_NAME,
+                              sizeof(EFI_SETUP_MODE_NAME),
+                              &gEfiGlobalVariableGuid,
+                              &saved_setup_mode,
+                              sizeof(saved_setup_mode),
+                              ATTR_BR);
+    }
+
+    return false;
 }
 
 bool
