@@ -2854,6 +2854,48 @@ static void test_check_nvram_certs_state_update_ok(void)
     reset_vars();
 }
 
+static void test_enter_setup_mode_auth_enforced(void)
+{
+    uint8_t *data = NULL;
+    uint8_t *pk_auth;
+    struct auth_info *pk_auth_info = &auth_info[ARRAY_SIZE(auth_info) - 1];
+    uint8_t *saved_auth_data = pk_auth_info->data;
+    UINTN len = 0;
+    off_t saved_auth_len = pk_auth_info->data_len;
+    size_t pk_auth_len;
+    EFI_STATUS status;
+
+    reset_vars();
+    setup_variables();
+    set_usermode();
+
+    pk_auth_len = sign(&pk_auth, PK_name, &gEfiGlobalVariableGuid,
+                       ATTR_BRNV_TIME, &test_timeb, NULL, 0, &sign_testPK);
+    pk_auth_info->data = pk_auth;
+    pk_auth_info->data_len = pk_auth_len;
+
+    auth_enforce = true;
+
+    g_assert_true(enter_setup_mode());
+    g_assert_true(auth_enforce);
+
+    check_variable_data(setupMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                        (uint8_t *)"\1", 1);
+    check_variable_data(deployedMode_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                        (uint8_t *)"\0", 1);
+    check_variable_data(secureBoot_name, &gEfiGlobalVariableGuid, BSIZ, 0,
+                        (uint8_t *)"\0", 1);
+
+    status = call_get_variable_data(PK_name, &gEfiGlobalVariableGuid,
+                                    BSIZ, 0, &data, &len);
+    g_assert_cmpuint(status, ==, EFI_NOT_FOUND);
+    g_assert_null(data);
+
+    pk_auth_info->data = saved_auth_data;
+    pk_auth_info->data_len = saved_auth_len;
+    free(pk_auth);
+}
+
 /*
  * The caller must free the returned buffer.
  */
@@ -3265,6 +3307,8 @@ int main(int argc, char **argv)
                     test_check_nvram_certs_state_update_required);
     g_test_add_func("/test/cert_update/check_nvram_certs_state/update_ok",
                     test_check_nvram_certs_state_update_ok);
+    g_test_add_func("/test/cert_update/enter_setup_mode/auth_enforced",
+                    test_enter_setup_mode_auth_enforced);
     g_test_add_func("/test/cert_update/check_local_auth_updated/no_data",
                     test_check_local_auth_updated_no_data);
     g_test_add_func("/test/cert_update/check_local_auth_updated/2011",
