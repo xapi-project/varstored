@@ -35,5 +35,7 @@
 enum certificate_current_state classify_certs_state(const struct cert_info *certs,
                                                     int count);
 enum certificate_current_state check_nvram_certs_state(int verbose);
+bool check_local_auth_updated(const uint8_t *auth_data, off_t auth_len,
+                              int verbose);
 
 #endif

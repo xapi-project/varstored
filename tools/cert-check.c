@@ -36,7 +36,7 @@
 #include <guid.h>
 #include <handler.h>
 
-#include <cert-check.h>
+#include "cert-check.h"
 
 /*
  * Classify the certificate state based on the parsed cert_info array.
@@ -99,4 +99,37 @@ check_nvram_certs_state(int verbose)
         return CERT_STATE_UNKNOWN;
 
     return classify_certs_state(certs, count);
+}
+
+/*
+ * Check whether the given auth file data contains updated (2023) certificates.
+ * This checks the EFI_VARIABLE_AUTHENTICATION_2 payload for an X.509
+ * signature list containing a latest-era certificate.
+ * Returns true if the local auth files are updated.
+ */
+bool
+check_local_auth_updated(const uint8_t *auth_data, off_t auth_len, int verbose)
+{
+    const WIN_CERTIFICATE *hdr;
+    UINTN header_len;
+    const uint8_t *payload;
+    UINTN payload_len;
+
+    if (!auth_data || auth_len == 0)
+        return false;
+
+    /* Skip past EFI_VARIABLE_AUTHENTICATION_2 header */
+    if (auth_len < (off_t)(sizeof(EFI_TIME) + sizeof(WIN_CERTIFICATE)))
+        return false;
+
+    hdr = (const WIN_CERTIFICATE *)(auth_data + sizeof(EFI_TIME));
+    header_len = sizeof(EFI_TIME) + hdr->dwLength;
+
+    if (header_len >= (UINTN)auth_len)
+        return false;
+
+    payload = auth_data + header_len;
+    payload_len = auth_len - header_len;
+
+    return siglist_has_latest_cert(payload, payload_len, verbose);
 }

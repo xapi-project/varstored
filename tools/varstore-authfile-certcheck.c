@@ -37,6 +37,7 @@
 #include <depriv.h>
 #include <handler.h>
 
+#include "cert-check.h"
 #include "tool-lib.h"
 
 const struct backend *db = NULL;
@@ -93,7 +94,14 @@ int main(int argc, char **argv)
     if (!load_auth_data())
         exit(1);
 
-    printf("%s\n", check_local_auth_updated(verbose) ? "updated" : "not-updated");
+    {
+        const uint8_t *auth_data;
+        off_t auth_len;
+
+        get_kek_auth_data(&auth_data, &auth_len);
+        printf("%s\n", check_local_auth_updated(auth_data, auth_len, verbose)
+               ? "updated" : "not-updated");
+    }
 
     free_auth_data();
     return 0;

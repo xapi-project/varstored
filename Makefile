@@ -65,8 +65,8 @@ $(TARGET): $(LIBS) $(OBJS)
 TOOLLIBS := -lcrypto -lseccomp $$(pkg-config --libs libxml-2.0)
 TOOLOBJS := tools/xapidb-cmdline.o \
             tools/xapidb-file.o \
+            tools/cert-check.o \
             tools/tool-lib.o \
-            cert-check.o \
             depriv.o \
             guid.o \
             handler.o \

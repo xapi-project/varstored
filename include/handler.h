@@ -31,6 +31,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #include "efi.h"
 
@@ -81,6 +82,7 @@ bool setup_keys(void);
 bool setup_keys_for_cert_update(void);
 bool load_auth_data(void);
 void free_auth_data(void);
+void get_kek_auth_data(const uint8_t **data, off_t *len);
 
 EFI_STATUS
 internal_set_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
@@ -114,6 +116,6 @@ struct cert_info {
 int parse_certs_from_siglist(const uint8_t *data, UINTN data_len,
                              struct cert_info *certs, int max_certs,
                              int verbose);
-bool check_local_auth_updated(int verbose);
+bool siglist_has_latest_cert(const uint8_t *data, UINTN data_len, int verbose);
 
 #endif
