@@ -30,7 +30,7 @@
 #include "handler.c"
 #include "mor.c"
 #include "xapidb-lib.c"
-#include "cert-check.c"
+#include "tools/cert-check.c"
 
 #include <glib.h>
 #include <openssl/pem.h>
@@ -2923,16 +2923,7 @@ build_fake_auth(const uint8_t *payload, size_t payload_len, size_t *out_len)
 /* Test check_local_auth_updated returns false when no auth data is loaded */
 static void test_check_local_auth_updated_no_data(void)
 {
-    uint8_t *saved_data = auth_info[2].data;
-    off_t saved_len = auth_info[2].data_len;
-
-    auth_info[2].data = NULL;
-    auth_info[2].data_len = 0;
-
-    g_assert_false(check_local_auth_updated(0));
-
-    auth_info[2].data = saved_data;
-    auth_info[2].data_len = saved_len;
+    g_assert_false(check_local_auth_updated(NULL, 0, 0));
 }
 
 /* Test check_local_auth_updated returns false for 2011-only KEK auth */
@@ -2942,20 +2933,13 @@ static void test_check_local_auth_updated_2011(void)
     size_t siglist_len;
     uint8_t *fake_auth;
     size_t fake_auth_len;
-    uint8_t *saved_data = auth_info[2].data;
-    off_t saved_len = auth_info[2].data_len;
 
     build_siglist_from_pem("certs/MicCorKEKCA2011_2011-06-24.pem",
                            &siglist, &siglist_len);
     fake_auth = build_fake_auth((uint8_t *)siglist, siglist_len, &fake_auth_len);
 
-    auth_info[2].data = fake_auth;
-    auth_info[2].data_len = fake_auth_len;
+    g_assert_false(check_local_auth_updated(fake_auth, fake_auth_len, 0));
 
-    g_assert_false(check_local_auth_updated(0));
-
-    auth_info[2].data = saved_data;
-    auth_info[2].data_len = saved_len;
     free(fake_auth);
     free(siglist);
 }
@@ -2967,21 +2951,14 @@ static void test_check_local_auth_updated_2023(void)
     size_t siglist_len;
     uint8_t *fake_auth;
     size_t fake_auth_len;
-    uint8_t *saved_data = auth_info[2].data;
-    off_t saved_len = auth_info[2].data_len;
 
     build_siglist_from_pems("certs/MicCorKEKCA2011_2011-06-24.pem",
                             "certs/ms-kek-ca-2023.pem",
                             &siglist, &siglist_len);
     fake_auth = build_fake_auth((uint8_t *)siglist, siglist_len, &fake_auth_len);
 
-    auth_info[2].data = fake_auth;
-    auth_info[2].data_len = fake_auth_len;
+    g_assert_true(check_local_auth_updated(fake_auth, fake_auth_len, 0));
 
-    g_assert_true(check_local_auth_updated(0));
-
-    auth_info[2].data = saved_data;
-    auth_info[2].data_len = saved_len;
     free(fake_auth);
     free(siglist);
 }
@@ -2990,16 +2967,8 @@ static void test_check_local_auth_updated_2023(void)
 static void test_check_local_auth_updated_truncated(void)
 {
     uint8_t small_buf[4] = {0};
-    uint8_t *saved_data = auth_info[2].data;
-    off_t saved_len = auth_info[2].data_len;
 
-    auth_info[2].data = small_buf;
-    auth_info[2].data_len = sizeof(small_buf);
-
-    g_assert_false(check_local_auth_updated(0));
-
-    auth_info[2].data = saved_data;
-    auth_info[2].data_len = saved_len;
+    g_assert_false(check_local_auth_updated(small_buf, sizeof(small_buf), 0));
 }
 
 /*

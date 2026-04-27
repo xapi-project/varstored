@@ -342,7 +342,7 @@ parse_certs_from_siglist(const uint8_t *data, UINTN data_len,
  * i.e. one issued in 2023 and expiring in 2038.
  * Returns true if such a certificate is found.
  */
-static bool
+bool
 siglist_has_latest_cert(const uint8_t *data, UINTN data_len, int verbose)
 {
     struct cert_info certs[MAX_CERTS_IN_SIGLIST];
@@ -2493,7 +2493,7 @@ enter_setup_mode(void)
                                        sizeof(setup_mode),
                                        ATTR_BR);
         if (status != EFI_SUCCESS) {
-            ERR("Failed to set SetupMode before deleting PK: 0x%llx\n", status);
+            ERR("Failed to set SetupMode before deleting PK: 0x%lx\n", status);
             return false;
         }
 
@@ -2504,7 +2504,7 @@ enter_setup_mode(void)
                                        sizeof(deployed_mode),
                                        ATTR_BR);
         if (status != EFI_SUCCESS) {
-            ERR("Failed to set DeployedMode before deleting PK: 0x%llx\n", status);
+            ERR("Failed to set DeployedMode before deleting PK: 0x%lx\n", status);
             internal_set_variable(EFI_SETUP_MODE_NAME,
                                   sizeof(EFI_SETUP_MODE_NAME),
                                   &gEfiGlobalVariableGuid,
@@ -2521,7 +2521,7 @@ enter_setup_mode(void)
                                        sizeof(secure_boot),
                                        ATTR_BR);
         if (status != EFI_SUCCESS) {
-            ERR("Failed to set SecureBoot before deleting PK: 0x%llx\n", status);
+            ERR("Failed to set SecureBoot before deleting PK: 0x%lx\n", status);
             internal_set_variable(EFI_DEPLOYED_MODE_NAME,
                                   sizeof(EFI_DEPLOYED_MODE_NAME),
                                   &gEfiGlobalVariableGuid,
@@ -2586,7 +2586,7 @@ enter_setup_mode(void)
     status = unserialize_uintn(&ptr);
     /* EFI_NOT_FOUND: PK already absent — platform is already in setup mode. */
     if (status != EFI_SUCCESS && status != EFI_NOT_FOUND) {
-        ERR("Failed to delete PK: 0x%llx\n", status);
+        ERR("Failed to delete PK: 0x%lx\n", status);
         goto restore_mode;
     }
 
@@ -2764,37 +2764,10 @@ free_auth_data(void)
     }
 }
 
-/*
- * Check whether the local auth files contain updated (2023) certificates.
- * This checks the KEK.auth file payload for multiple X.509 certificates.
- * Returns true if the local auth files are updated.
- */
-bool
-check_local_auth_updated(int verbose)
+void
+get_kek_auth_data(const uint8_t **data, off_t *len)
 {
     /* auth_info[2] is KEK */
-    const uint8_t *auth_data = auth_info[2].data;
-    off_t auth_len = auth_info[2].data_len;
-    const WIN_CERTIFICATE *hdr;
-    UINTN header_len;
-    const uint8_t *payload;
-    UINTN payload_len;
-
-    if (!auth_data || auth_len == 0)
-        return false;
-
-    /* Skip past EFI_VARIABLE_AUTHENTICATION_2 header */
-    if (auth_len < (off_t)(sizeof(EFI_TIME) + sizeof(WIN_CERTIFICATE)))
-        return false;
-
-    hdr = (const WIN_CERTIFICATE *)(auth_data + sizeof(EFI_TIME));
-    header_len = sizeof(EFI_TIME) + hdr->dwLength;
-
-    if (header_len >= (UINTN)auth_len)
-        return false;
-
-    payload = auth_data + header_len;
-    payload_len = auth_len - header_len;
-
-    return siglist_has_latest_cert(payload, payload_len, verbose);
+    *data = auth_info[2].data;
+    *len = auth_info[2].data_len;
 }

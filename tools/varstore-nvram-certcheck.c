@@ -37,7 +37,7 @@
 #include <depriv.h>
 #include <handler.h>
 
-#include <cert-check.h>
+#include "cert-check.h"
 #include "tool-lib.h"
 
 const struct backend *db = NULL;
