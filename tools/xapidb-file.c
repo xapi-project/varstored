@@ -60,5 +60,4 @@ const struct backend xapidb_file = {
     .parse_arg = xapidb_file_parse_arg,
     .check_args = xapidb_file_check_args,
     .init = xapidb_file_init,
-    .set_variable = xapidb_set_variable,
 };
