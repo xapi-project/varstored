@@ -117,5 +117,6 @@ int parse_certs_from_siglist(const uint8_t *data, UINTN data_len,
                              struct cert_info *certs, int max_certs,
                              int verbose);
 bool siglist_has_latest_cert(const uint8_t *data, UINTN data_len, int verbose);
+bool check_kek_and_db_uptodate(void);
 
 #endif

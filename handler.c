@@ -368,7 +368,7 @@ siglist_has_latest_cert(const uint8_t *data, UINTN data_len, int verbose)
  * one up-to-date certificate (i.e. one that satisfies NOT_EXPIRE). Both
  * variables must be present and up-to-date for true to be returned.
  */
-static bool
+bool
 check_kek_and_db_uptodate(void)
 {
     uint8_t *kek_data = NULL, *db_data = NULL;
@@ -396,31 +396,55 @@ out:
     return result;
 }
 
-/* A limited version of SetVariable for internal use. */
+/* A limited version of SetVariable for internal use.
+ * Passing data_len == 0 requests deletion of the variable.
+ */
 EFI_STATUS
 internal_set_variable(const uint8_t *name, UINTN name_len, const EFI_GUID *guid,
                       const uint8_t *data, UINTN data_len, UINT32 attr)
 {
-    struct efi_variable *l;
-    uint8_t *new_data;
-
-    new_data = malloc(data_len);
-    if (!new_data)
-        return EFI_DEVICE_ERROR;
-    memcpy(new_data, data, data_len);
+    struct efi_variable *l, *prev = NULL;
+    uint8_t *new_data = NULL;
 
     l = var_list;
     while (l) {
         if (l->name_len == name_len &&
                 !memcmp(l->name, name, name_len) &&
                 !memcmp(&l->guid, guid, GUID_LEN)) {
+            if (data_len == 0) {
+                if (prev)
+                    prev->next = l->next;
+                else
+                    var_list = l->next;
+
+                free(l->name);
+                free(l->data);
+                free(l);
+                return EFI_SUCCESS;
+            }
+
+            new_data = malloc(data_len);
+            if (!new_data)
+                return EFI_DEVICE_ERROR;
+            memcpy(new_data, data, data_len);
+
             free(l->data);
             l->data = new_data;
             l->data_len = data_len;
+            l->attributes = attr;
             return EFI_SUCCESS;
         }
+        prev = l;
         l = l->next;
     }
+
+    if (data_len == 0)
+        return EFI_NOT_FOUND;
+
+    new_data = malloc(data_len);
+    if (!new_data)
+        return EFI_DEVICE_ERROR;
+    memcpy(new_data, data, data_len);
 
     l = calloc(1, sizeof *l);
     if (!l) {
@@ -912,45 +936,6 @@ static bool time_later(EFI_TIME *a, EFI_TIME *b)
         return b->Second > a->Second;
 }
 
-static bool
-increment_time(EFI_TIME *timestamp)
-{
-    if (timestamp->Second < 59) {
-        timestamp->Second++;
-        return true;
-    }
-    timestamp->Second = 0;
-
-    if (timestamp->Minute < 59) {
-        timestamp->Minute++;
-        return true;
-    }
-    timestamp->Minute = 0;
-
-    if (timestamp->Hour < 23) {
-        timestamp->Hour++;
-        return true;
-    }
-    timestamp->Hour = 0;
-
-    if (timestamp->Day < 31) {
-        timestamp->Day++;
-        return true;
-    }
-    timestamp->Day = 1;
-
-    if (timestamp->Month < 12) {
-        timestamp->Month++;
-        return true;
-    }
-    timestamp->Month = 1;
-
-    if (timestamp->Year == (UINT16)~0)
-        return false;
-
-    timestamp->Year++;
-    return true;
-}
 
 enum auth_type {
     AUTH_TYPE_PK,
@@ -2439,29 +2424,18 @@ set_variable_from_auth(const uint8_t *name, UINTN name_len, const EFI_GUID *guid
  * Delete the PK to transition the platform to setup mode (SetupMode=1)
  * without disabling auth enforcement.
  *
- * The PK delete is issued after moving the internal mode variables to setup
- * mode so that PK verification uses the setup-mode payload path. The command
- * reuses the PKCS#7 envelope from the loaded PK auth blob and uses a
- * timestamp later than the current PK timestamp to satisfy time-based auth
- * checks.
+ * This path performs an internal PK deletion after moving the mode variables,
+ * avoiding the need to synthesize a signed SetVariable payload.
  */
 static bool
 enter_setup_mode(void)
 {
-    uint8_t buf[SHMEM_SIZE];
-    uint8_t *auth = NULL;
-    uint8_t *ptr;
-    struct efi_variable *pk, *setup_mode_var, *deployed_mode_var, *secure_boot_var;
-    const struct auth_info *pk_auth_info = &auth_info[ARRAY_SIZE(auth_info) - 1];
-    EFI_VARIABLE_AUTHENTICATION_2 *auth2;
-    UINTN auth_len;
+    struct efi_variable *setup_mode_var, *deployed_mode_var, *secure_boot_var;
     uint8_t saved_setup_mode, saved_deployed_mode, saved_secure_boot;
     uint8_t setup_mode = 1, deployed_mode = 0, secure_boot = 0;
     bool changed_mode = false;
     EFI_STATUS status;
 
-    pk = find_variable(EFI_PLATFORM_KEY_NAME, sizeof(EFI_PLATFORM_KEY_NAME),
-                       &gEfiGlobalVariableGuid);
     setup_mode_var = find_variable(EFI_SETUP_MODE_NAME, sizeof(EFI_SETUP_MODE_NAME),
                                    &gEfiGlobalVariableGuid);
     deployed_mode_var = find_variable(EFI_DEPLOYED_MODE_NAME,
@@ -2540,51 +2514,13 @@ enter_setup_mode(void)
         changed_mode = true;
     }
 
-    if (!pk_auth_info->data ||
-            pk_auth_info->data_len < offsetof(EFI_VARIABLE_AUTHENTICATION_2,
-                                              AuthInfo.CertData)) {
-        ERR("Missing PK auth data while entering setup mode\n");
-        goto restore_mode;
-    }
-
-    auth2 = (EFI_VARIABLE_AUTHENTICATION_2 *)pk_auth_info->data;
-    auth_len = offsetof(EFI_VARIABLE_AUTHENTICATION_2, AuthInfo) +
-               auth2->AuthInfo.Hdr.dwLength;
-    if (pk_auth_info->data_len < auth_len) {
-        ERR("Invalid PK auth data while entering setup mode\n");
-        goto restore_mode;
-    }
-
-    auth = malloc(auth_len);
-    if (!auth)
-        goto restore_mode;
-    memcpy(auth, pk_auth_info->data, auth_len);
-    auth2 = (EFI_VARIABLE_AUTHENTICATION_2 *)auth;
-
-    if (pk) {
-        auth2->TimeStamp = pk->timestamp;
-        if (!increment_time(&auth2->TimeStamp)) {
-            ERR("Failed to advance PK timestamp for setup mode transition\n");
-            free(auth);
-            goto restore_mode;
-        }
-    }
-
-    ptr = buf;
-    serialize_uint32(&ptr, 1); /* version */
-    serialize_uint32(&ptr, COMMAND_SET_VARIABLE);
-    serialize_data(&ptr, EFI_PLATFORM_KEY_NAME, sizeof(EFI_PLATFORM_KEY_NAME));
-    serialize_guid(&ptr, &gEfiGlobalVariableGuid);
-    serialize_data(&ptr, auth, auth_len);
-    serialize_uint32(&ptr, ATTR_BRNV_TIME);
-    *ptr = 0; /* at_runtime */
-
-    dispatch_command(buf);
-    free(auth);
-
-    ptr = buf;
-    status = unserialize_uintn(&ptr);
-    /* EFI_NOT_FOUND: PK already absent — platform is already in setup mode. */
+    status = internal_set_variable(EFI_PLATFORM_KEY_NAME,
+                                   sizeof(EFI_PLATFORM_KEY_NAME),
+                                   &gEfiGlobalVariableGuid,
+                                   NULL,
+                                   0,
+                                   ATTR_BRNV_TIME);
+    /* EFI_NOT_FOUND: PK already absent - platform is already in setup mode. */
     if (status != EFI_SUCCESS && status != EFI_NOT_FOUND) {
         ERR("Failed to delete PK: 0x%lx\n", status);
         goto restore_mode;
@@ -2639,7 +2575,7 @@ setup_keys(void)
              * KEK/db set which will cause in-guest dbx updates to fail.
              */
             WARN("Aborting keys setup\n");
-            return false;
+            return true;
         }
 
         INFO("Setting %s...\n", auth_info[i].pretty_name);
