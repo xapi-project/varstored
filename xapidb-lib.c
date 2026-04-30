@@ -91,6 +91,17 @@
       "</params>" \
     "</methodCall>"
 
+#define VM_SET_NVRAM_EFI_VARIABLES_CALL \
+        "<?xml version='1.0'?>" \
+        "<methodCall>" \
+            "<methodName>VM.set_NVRAM_EFI_variables</methodName>" \
+            "<params>" \
+                "<param><value><string>%s</string></value></param>" \
+                "<param><value><string>%s</string></value></param>" \
+                "<param><value><string>%s</string></value></param>" \
+            "</params>" \
+        "</methodCall>"
+
 #define VM_SET_NVRAM_EFI_VARIABLES_CALL_V2 \
     "<?xml version='1.0'?>" \
     "<methodCall>" \
@@ -150,8 +161,10 @@
 char *xapidb_arg_init;
 /* The VM's uuid. Used for saving to the XAPI db. */
 char *xapidb_arg_uuid;
+#define XAPI_DEFAULT_SOCKET "/var/lib/xcp/xapi"
+
 /* Path to the XAPI socket. */
-char *xapidb_arg_socket = "/var/lib/xcp/xapi";
+char *xapidb_arg_socket = XAPI_DEFAULT_SOCKET;
 
 /*
  * The VM's opaqueref: cached for the lifetime of varstored.
@@ -422,9 +435,17 @@ send_to_xapi(char *uuid, char *data, bool update)
         response = NULL;
     }
 
-    status = xmlrpc_call(&response,
-                         VM_SET_NVRAM_EFI_VARIABLES_CALL_V2,
-                         session_ref, xapidb_vm_ref, data, update_str);
+    if (strcmp(xapidb_arg_socket, XAPI_DEFAULT_SOCKET) != 0) {
+        /* Deprivileged: connected to xapi-guard */
+        status = xmlrpc_call(&response,
+                             VM_SET_NVRAM_EFI_VARIABLES_CALL_V2,
+                             session_ref, xapidb_vm_ref, data, update_str);
+    } else {
+        /* Default XAPI socket */
+        status = xmlrpc_call(&response,
+                             VM_SET_NVRAM_EFI_VARIABLES_CALL,
+                             session_ref, xapidb_vm_ref, data);
+    }
     if (status != HTTP_STATUS_OK)
         goto out;
     if (!xmlrpc_process(response, NULL))
