@@ -90,6 +90,7 @@ static inline void
 serialize_boolean(uint8_t **ptr, BOOLEAN var)
 {
     memcpy(*ptr, &var, sizeof(var));
+    barrier();
     *ptr += sizeof var;
 }
 
