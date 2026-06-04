@@ -74,10 +74,22 @@
 #include "io_port.h"
 #include "option.h"
 
+/* Get the correct defines for memory barriers - do not fall
+ * back to those provided by the kernel */
+/* from <xen-barrier.h> in 4.20.0 */
+
+#define xen_barrier() asm volatile ( "" : : : "memory")
+
 #if defined(__i386__)
-# define smp_mb()  asm volatile ( "lock addl $0, -4(%%esp)" ::: "memory" )
+#define xen_mb()  asm volatile ( "lock addl $0, -4(%%esp)" ::: "memory" )
 #elif defined(__x86_64__)
-# define smp_mb()  asm volatile ( "lock addl $0, -32(%%rsp)" ::: "memory" )
+#define xen_mb()  asm volatile ( "lock addl $0, -32(%%rsp)" ::: "memory" )
+#elif defined(__arm__)
+#define xen_mb()   asm volatile ("dmb" : : : "memory")
+#elif defined(__aarch64__)
+#define xen_mb()   asm volatile ("dmb sy" : : : "memory")
+#else
+#error "Define barriers"
 #endif
 
 #define IO_PORT_ADDRESS 0x0100
@@ -557,15 +569,15 @@ varstored_poll_iopage(unsigned int i)
         fprintf(stderr, "IO request not ready\n");
         return;
     }
-    smp_mb();
+    xen_mb();
 
     ioreq->state = STATE_IOREQ_INPROCESS;
 
     handle_ioreq(ioreq);
-    smp_mb();
+    xen_mb();
 
     ioreq->state = STATE_IORESP_READY;
-    smp_mb();
+    xen_mb();
 
     xenevtchn_notify(varstored_state.evth, varstored_state.ioreq_local_port[i]);
 }
