@@ -182,7 +182,7 @@ register_io_port_writel_handler(uint64_t address, writel_callback_t callback) {
     r = get_port(address, &port);
     if (!r)
        return false;
-    if (io_port.readl[port]) {
+    if (io_port.writel[port]) {
        ERR("Failed to register io_port_handler, handler already exits. address: %016"PRIx64"\n", address);
        return false;
     }
