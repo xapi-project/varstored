@@ -14,6 +14,18 @@ varstored is designed to allow using multiple different backends for storage of
 NVRAM. Currently the primary storage backend stores and retrieves the data from
 the XAPI database.
 
+The following backends are available, selected with `--backend`:
+
+- `xapidb`: stores NVRAM in the XAPI database. Requires `--arg uuid:<vm-uuid>`.
+- `file`: stores NVRAM in a local file given by `--arg file:<path>`. The file
+  contains a base64-encoded NVRAM blob (the same format used by XAPI). If the
+  file does not exist, the VM is treated as booting for the first time and the
+  file is created when NV variables are first written. Paths are resolved
+  inside the chroot when `--chroot` is used.
+
+Both backends accept `--arg save:<path>` and `--arg resume:<path>` for saving
+and restoring the full variable state across `--resume`.
+
 Building
 --------
 

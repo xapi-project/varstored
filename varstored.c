@@ -664,6 +664,8 @@ main(int argc, char **argv)
         case VARSTORED_OPT_BACKEND:
             if (!strcmp(optarg, "xapidb")) {
                 db = &xapidb;
+            } else if (!strcmp(optarg, "file")) {
+                db = &filedb;
             } else {
                 fprintf(stderr, "Invalid backend '%s'\n", optarg);
                 usage();

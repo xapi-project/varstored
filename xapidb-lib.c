@@ -990,6 +990,74 @@ xapidb_file_init(void)
     return ret ? BACKEND_INIT_SUCCESS : BACKEND_INIT_FAILURE;
 }
 
+/*
+ * Write the NV variables to the file given by xapidb_arg_init as a
+ * base64-encoded NVRAM blob (the same format read by xapidb_file_init).
+ * The data is written to a temporary file which is then renamed over the
+ * original so that the file is never left partially written.
+ */
+bool
+xapidb_file_set_variable(bool update)
+{
+    uint8_t *buf;
+    char *encoded, *tmp_path;
+    size_t len;
+    FILE *f;
+
+    (void)update;
+
+    if (!xapidb_serialize_variables(&buf, &len, true))
+        return false;
+
+    if (!base64_encode(buf, len, &encoded)) {
+        free(buf);
+        return false;
+    }
+    free(buf);
+
+    if (asprintf(&tmp_path, "%s.tmp", xapidb_arg_init) == -1) {
+        ERR("Failed to allocate memory\n");
+        free(encoded);
+        return false;
+    }
+
+    f = fopen(tmp_path, "w");
+    if (!f) {
+        ERR("Failed to open '%s': %s\n", tmp_path, strerror(errno));
+        goto err;
+    }
+
+    len = strlen(encoded);
+    if (fwrite(encoded, 1, len, f) != len || fflush(f) || fsync(fileno(f))) {
+        ERR("Failed to write to '%s': %s\n", tmp_path, strerror(errno));
+        fclose(f);
+        unlink(tmp_path);
+        goto err;
+    }
+
+    if (fclose(f)) {
+        ERR("Failed to close '%s': %s\n", tmp_path, strerror(errno));
+        unlink(tmp_path);
+        goto err;
+    }
+
+    if (rename(tmp_path, xapidb_arg_init) == -1) {
+        ERR("Failed to rename '%s' to '%s': %s\n", tmp_path, xapidb_arg_init,
+            strerror(errno));
+        unlink(tmp_path);
+        goto err;
+    }
+
+    free(tmp_path);
+    free(encoded);
+    return true;
+
+err:
+    free(tmp_path);
+    free(encoded);
+    return false;
+}
+
 bool
 xapidb_sb_notify(void)
 {
