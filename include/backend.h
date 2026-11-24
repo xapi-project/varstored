@@ -69,6 +69,7 @@ struct backend {
 
 extern const struct backend *db;
 extern const struct backend xapidb;
+extern const struct backend filedb;
 extern const struct backend xapidb_cmdline;
 extern const struct backend xapidb_file;
 

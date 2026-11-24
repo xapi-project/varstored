@@ -165,3 +165,63 @@ const struct backend xapidb = {
     .set_variable = xapidb_set_variable,
     .sb_notify = xapidb_sb_notify,
 };
+
+static bool
+filedb_parse_arg(const char *name, const char *val)
+{
+    if (!strcmp(name, "file"))
+        xapidb_arg_init = strdup(val);
+    else if (!strcmp(name, "resume"))
+        arg_resume = strdup(val);
+    else if (!strcmp(name, "save"))
+        arg_save = strdup(val);
+    else
+        return false;
+
+    return true;
+}
+
+static bool
+filedb_check_args(void)
+{
+    if (!xapidb_arg_init) {
+        fprintf(stderr, "Backend arg 'file' is required\n");
+        return false;
+    }
+    if (!opt_resume && arg_resume) {
+        fprintf(stderr, "Backend arg 'resume' is invalid when not resuming\n");
+        return false;
+    }
+
+    return true;
+}
+
+static enum backend_init_status
+filedb_init(void)
+{
+    struct stat st;
+
+    /* A missing file is treated as first boot; it is created on first write. */
+    if (stat(xapidb_arg_init, &st) == -1 && errno == ENOENT)
+        return BACKEND_INIT_FIRSTBOOT;
+
+    return xapidb_file_init();
+}
+
+static bool
+filedb_sb_notify(void)
+{
+    INFO("Secure Boot verification failure\n");
+
+    return true;
+}
+
+const struct backend filedb = {
+    .parse_arg = filedb_parse_arg,
+    .check_args = filedb_check_args,
+    .init = filedb_init,
+    .save = xapidb_save,
+    .resume = xapidb_resume,
+    .set_variable = xapidb_file_set_variable,
+    .sb_notify = filedb_sb_notify,
+};
